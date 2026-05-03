@@ -3,35 +3,41 @@
 Entry point for the broker's HTTP layer. The CLI calls :func:`run`; tests
 call :func:`build_app` to obtain the ASGI app for ``httpx.ASGITransport``.
 
-Routes (Phase 1 layout — handlers stubbed until they land):
+Routes:
 
-- ``GET  /``                    — static dashboard (``web/index.html``)
-- ``GET  /api/health``          — liveness probe; returns broker version
-- ``GET  /api/config``          — sanitized config (no secrets)
-- ``PUT  /api/config``          — update config; reloads LLM client in place
-- ``POST /api/chat``            — dashboard chat (SSE streaming response)
-- ``GET  /events``              — WebSocket event stream
-- ``ANY  /mcp``                 — Streamable HTTP MCP endpoint (FastMCP)
+- ``GET  /``                    static dashboard (``web/index.html``)
+- ``GET  /api/health``          liveness probe; broker version + proxy state
+- ``GET  /api/config``          sanitized config (no secrets)
+- ``PUT  /api/config``          merge-patch config; persists to disk
+- ``POST /api/chat``            single-shot chat completion with tool routing
+- ``WS   /events``              live event stream for the dashboard
+- ``ANY  /mcp``                 Streamable HTTP MCP endpoint (proxy + extras)
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import uvicorn
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
+from starlette.types import Receive, Scope, Send
 
-from cegm_broker import __version__
+from cegm_broker import __version__, parent_watch
 from cegm_broker._logging import get_logger
+from cegm_broker.api import chat, config_get, config_put, health
 from cegm_broker.config import Config
-from cegm_broker.event_bus import EventBus
+from cegm_broker.event_bus import Event, EventBus
+from cegm_broker.mcp_proxy import MCPProxy, ProxyConfig
+from cegm_broker.mcp_server import build_server
+from cegm_broker.ws import events_endpoint
 
 if TYPE_CHECKING:
     from starlette.types import ASGIApp
@@ -44,77 +50,110 @@ _log = get_logger(__name__)
 _WEB_DIR: Path = Path(__file__).resolve().parents[3] / "web"
 
 
-@asynccontextmanager
-async def _lifespan(app: Starlette) -> AsyncIterator[None]:
-    """Start and stop background services bound to app lifetime."""
-    config = Config.load()
-    bus = EventBus()
-    app.state.config = config
-    app.state.bus = bus
-    _log.info(
-        "broker.lifespan_started",
-        extra={"version": __version__, "port": config.server.port},
-    )
-    try:
-        # Phase 1 wires real subsystems here:
-        #   - mcp_proxy.spawn(config) for the miscusi-peek child
-        #   - mcp_extras.register(...) on the FastMCP server
-        #   - parent_watch.watch(parent_pid) as a task
-        yield
-    finally:
-        _log.info("broker.lifespan_stopped")
+def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]
+    """Build a lifespan context manager bound to a particular ``parent_pid``."""
+
+    @asynccontextmanager
+    async def lifespan(app: Starlette) -> AsyncIterator[None]:
+        config = Config.load()
+        bus = EventBus()
+        proxy = MCPProxy(ProxyConfig.from_env())
+        await proxy.start()  # graceful failure if upstream isn't reachable
+        await bus.publish(
+            Event.make(
+                "broker_status",
+                {
+                    "version": __version__,
+                    "port": config.server.port,
+                    "proxy_available": proxy.available,
+                    "proxy_tool_count": len(proxy.tools),
+                    "proxy_error": proxy.error,
+                },
+            )
+        )
+
+        mcp_server = build_server(proxy, bus)
+        session_mgr = StreamableHTTPSessionManager(
+            mcp_server,
+            json_response=True,
+            stateless=True,
+        )
+
+        watcher_task: asyncio.Task[None] | None = None
+        async with session_mgr.run():
+            app.state.config = config
+            app.state.bus = bus
+            app.state.proxy = proxy
+            app.state.mcp_session_mgr = session_mgr
+
+            if parent_pid is not None:
+                watcher_task = asyncio.create_task(parent_watch.watch(parent_pid))
+
+            _log.info(
+                "broker.lifespan_started",
+                extra={
+                    "version": __version__,
+                    "port": config.server.port,
+                    "proxy_available": proxy.available,
+                },
+            )
+            try:
+                yield
+            finally:
+                if watcher_task is not None:
+                    watcher_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await watcher_task
+                await proxy.stop()
+                _log.info("broker.lifespan_stopped")
+
+    return lifespan
 
 
-async def _health(request: Request) -> JSONResponse:
-    """Liveness probe used by both humans and the CE-side port-readiness loop."""
-    config: Config = request.app.state.config
-    bus: EventBus = request.app.state.bus
-    return JSONResponse(
-        {
-            "ok": True,
-            "version": __version__,
-            "port": config.server.port,
-            "subscribers": bus.subscriber_count,
-        }
-    )
+async def _mcp_asgi(scope: Scope, receive: Receive, send: Send) -> None:
+    """Deferred ASGI delegate for ``/mcp`` — looks up the session manager at request time.
+
+    Mount needs an ASGI app at construction; ``session_mgr`` is only built
+    inside the lifespan. This shim defers the lookup so initialization
+    order is independent of route registration.
+    """
+    app = scope.get("app")
+    session_mgr = getattr(getattr(app, "state", None), "mcp_session_mgr", None)
+    if session_mgr is None:
+        # 503 — server is still starting (rare but possible if a client
+        # hits us during the brief window before lifespan completes).
+        if scope["type"] != "http":
+            return
+        await send({"type": "http.response.start", "status": 503, "headers": []})
+        await send({"type": "http.response.body", "body": b"MCP session manager not ready"})
+        return
+    await session_mgr.handle_request(scope, receive, send)
 
 
-async def _config_get(request: Request) -> JSONResponse:
-    """Return the sanitized config (no secrets)."""
-    config: Config = request.app.state.config
-    return JSONResponse(config.sanitized())
-
-
-def build_app() -> ASGIApp:
+def build_app(parent_pid: int | None = None) -> ASGIApp:
     """Construct the Starlette ASGI application without binding a port."""
-    routes: list[Route] = [
-        Route("/api/health", _health, methods=["GET"]),
-        Route("/api/config", _config_get, methods=["GET"]),
-        # /api/config PUT, /api/chat, /events, /mcp wired in Phase 1 patches.
+    routes: list[Route | WebSocketRoute | Mount] = [
+        Route("/api/health", health, methods=["GET"]),
+        Route("/api/config", config_get, methods=["GET"]),
+        Route("/api/config", config_put, methods=["PUT"]),
+        Route("/api/chat", chat, methods=["POST"]),
+        WebSocketRoute("/events", events_endpoint),
+        Mount("/mcp", app=_mcp_asgi),
     ]
 
-    app = Starlette(routes=routes, lifespan=_lifespan)
-
-    # Static dashboard at "/". Mounted last so explicit routes take priority.
     if _WEB_DIR.is_dir():
-        app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="web")
+        # Static dashboard at "/" — mounted last so explicit routes take priority.
+        routes.append(Mount("/", app=StaticFiles(directory=_WEB_DIR, html=True), name="web"))
     else:  # pragma: no cover — only hit if web/ is missing in a packaged sdist
         _log.warning("server.web_dir_missing", extra={"path": str(_WEB_DIR)})
 
-    return app
+    return Starlette(routes=routes, lifespan=_make_lifespan(parent_pid))
 
 
 def run(*, host: str, port: int, parent_pid: int | None = None) -> None:
-    """Block on a uvicorn server bound to ``host:port``.
-
-    ``parent_pid`` is wired up to :mod:`cegm_broker.parent_watch` once that
-    integration lands. The argument is accepted now so the CLI signature is
-    stable across phases.
-    """
-    del parent_pid  # Phase 1 hookup pending.
-
+    """Block on a uvicorn server bound to ``host:port``."""
     config = uvicorn.Config(
-        app=build_app(),
+        app=build_app(parent_pid=parent_pid),
         host=host,
         port=port,
         log_config=None,  # we own logging via _logging.py

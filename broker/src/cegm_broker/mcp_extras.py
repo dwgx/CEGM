@@ -1,32 +1,62 @@
-"""CEGM-namespaced MCP tools and resources layered over the proxied surface.
+"""CEGM-namespaced MCP tools layered over the proxied surface.
 
-Every symbol declared here is documented in :doc:`/docs/TOOL_SPEC.md` and
-must have a corresponding test in ``tests/test_extras_cegm.py``.
-
-Phase 1 lands ``cegm.activity_recent`` (Resource) plus the
-``cegm.preview_*`` triplet. Snapshots arrive in Phase 3.
+Phase 1 ships :func:`cegm.activity_recent` only — enough to prove the
+extras pathway end-to-end. Snapshots and the preview-write triplet land
+in Phase 2 / Phase 3. See :doc:`/docs/TOOL_SPEC.md`.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from collections.abc import Sequence
+from typing import Any, Final
+
+from mcp import types
 
 from cegm_broker._logging import get_logger
-
-if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
-
-    from cegm_broker.event_bus import EventBus
-    from cegm_broker.mcp_proxy import MCPProxy
+from cegm_broker.event_bus import EventBus
 
 _log = get_logger(__name__)
 
+EXTRAS_TOOL_DEFS: Final[list[types.Tool]] = [
+    types.Tool(
+        name="cegm.activity_recent",
+        description=(
+            "Return the most recent CEGM events (tool calls, chat turns, "
+            "preview/snapshot lifecycle, broker/CE status). Use when you "
+            "need to recall what just happened without re-running tools."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "default": 50,
+                    "description": "Max events to return (most recent last).",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+]
 
-def register(mcp: FastMCP, proxy: MCPProxy, bus: EventBus) -> None:
-    """Wire CEGM extras onto the given FastMCP server.
 
-    Implementations land in Phase 1 / Phase 3. The signature is stable so
-    :mod:`cegm_broker.server` can call this once during lifespan setup.
-    """
-    del mcp, proxy, bus  # placeholder
-    _log.debug("mcp_extras.register_pending")
+def is_extra(name: str) -> bool:
+    """Return ``True`` if ``name`` is one of CEGM's ``cegm.*`` tools."""
+    return name.startswith("cegm.")
+
+
+async def dispatch(
+    name: str,
+    arguments: dict[str, Any],
+    bus: EventBus,
+) -> Sequence[types.ContentBlock]:
+    """Execute a CEGM extra tool. Raises :class:`KeyError` on unknown name."""
+    if name == "cegm.activity_recent":
+        limit = int(arguments.get("limit", 50))
+        events = bus.recent(limit)
+        payload = json.dumps(events, ensure_ascii=False, default=str, indent=2)
+        return [types.TextContent(type="text", text=payload)]
+    raise KeyError(f"unknown CEGM tool: {name!r}")

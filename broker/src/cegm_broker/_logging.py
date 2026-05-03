@@ -111,7 +111,12 @@ def configure_logging(level: str = "info") -> None:
     file_handler.setLevel(log_level)
 
     root = logging.getLogger()
-    root.handlers.clear()
+    # Close any handlers we previously installed so the FileHandler's file
+    # descriptor is released — important for tests that re-configure
+    # repeatedly under different temp dirs.
+    for old in list(root.handlers):
+        old.close()
+        root.removeHandler(old)
     root.addHandler(stderr_handler)
     root.addHandler(file_handler)
     root.setLevel(log_level)
