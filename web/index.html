@@ -95,24 +95,53 @@
           </form>
         </section>
 
-        <!-- Timeline column -->
+        <!-- Right column with tabs -->
         <section class="flex min-h-0 flex-col">
-          <div class="flex items-center justify-between border-b border-zinc-800 px-6 py-2">
-            <h2 data-i18n="activity.title" class="font-mono text-xs uppercase tracking-wider text-zinc-400">Activity</h2>
-            <button
-              id="timeline-clear"
-              type="button"
-              data-i18n="activity.clear"
-              class="font-mono text-xs uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
-            >clear</button>
+          <nav class="flex items-center gap-1 border-b border-zinc-800 px-3 py-2 text-xs"
+               role="tablist">
+            <button data-tab="activity"
+                    role="tab"
+                    aria-selected="true"
+                    data-i18n="tabs.activity"
+                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
+              Activity
+            </button>
+            <button data-tab="scans"
+                    role="tab"
+                    data-i18n="tabs.scans"
+                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
+              Scans
+            </button>
+            <button data-tab="watches"
+                    role="tab"
+                    data-i18n="tabs.watches"
+                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
+              Watches
+            </button>
+            <button data-tab="tools"
+                    role="tab"
+                    data-i18n="tabs.tools"
+                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
+              Tools
+            </button>
+            <span class="flex-1"></span>
+            <button id="timeline-clear"
+                    type="button"
+                    data-i18n="activity.clear"
+                    class="font-mono text-xs uppercase tracking-wider text-zinc-500 hover:text-zinc-300">
+              clear
+            </button>
+          </nav>
+
+          <div data-tab-panel="activity" class="flex-1 overflow-y-auto">
+            <ol id="timeline" class="p-4 font-mono text-xs" aria-live="polite">
+              <li data-i18n="activity.empty" class="text-zinc-600">— no activity yet —</li>
+            </ol>
           </div>
-          <ol
-            id="timeline"
-            class="flex-1 overflow-y-auto p-4 font-mono text-xs"
-            aria-live="polite"
-          >
-            <li data-i18n="activity.empty" class="text-zinc-600">— no activity yet —</li>
-          </ol>
+
+          <div data-tab-panel="scans" hidden id="scan-panel" class="flex-1 overflow-y-auto"></div>
+          <div data-tab-panel="watches" hidden id="watch-panel" class="flex-1 overflow-y-auto"></div>
+          <div data-tab-panel="tools" hidden id="tools-panel" class="flex-1 overflow-y-auto flex flex-col"></div>
         </section>
       </main>
     </div>

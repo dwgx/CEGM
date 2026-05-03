@@ -1,7 +1,7 @@
 /**
  * @file Dashboard entry point. Wires DOM event handlers to the modular
- * subsystems (api / ws / timeline / chat / settings / i18n / notify) and
- * kicks off the WebSocket connection.
+ * subsystems (api / ws / timeline / chat / settings / i18n / notify /
+ * tabs / scans / watches / tools) and kicks off the WebSocket connection.
  */
 import {fetchHealth} from "/js/api.js";
 import {openEventStream} from "/js/ws.js";
@@ -10,6 +10,10 @@ import {bindChat, submitMessage} from "/js/chat.js";
 import {bindSettings} from "/js/settings.js";
 import {applyTranslations, getLang, setLang, t} from "/js/i18n.js";
 import {flashTabTitle, desktopNotify} from "/js/notify.js";
+import {bindTabs} from "/js/tabs.js";
+import {bindScans} from "/js/scans.js";
+import {bindWatches} from "/js/watches.js";
+import {bindTools} from "/js/tools.js";
 
 function setStatus(label) {
   document.documentElement.dataset.status = label;
@@ -31,12 +35,6 @@ async function probeBroker() {
   }
 }
 
-/**
- * An external MCP client called ``cegm.dashboard_chat`` and the broker
- * fanned out a ``dashboard_chat_request`` event. Inject the message
- * into the local chat as if the user had typed it, flash the tab
- * title, and try to raise a desktop notification.
- */
 function handleDashboardChatRequest(evt) {
   const msg = evt?.data?.message;
   if (typeof msg !== "string" || !msg) return;
@@ -45,9 +43,27 @@ function handleDashboardChatRequest(evt) {
   desktopNotify(msg);
 }
 
+/** A simple multiplexer so each panel can subscribe to events. */
+function makeBroker() {
+  const handlers = new Set();
+  return {
+    on(fn) {
+      handlers.add(fn);
+      return () => handlers.delete(fn);
+    },
+    emit(evt) {
+      for (const h of handlers) {
+        try {
+          h(evt);
+        } catch (err) {
+          console.warn("event handler threw", err);
+        }
+      }
+    },
+  };
+}
+
 function init() {
-  // Apply translations BEFORE binding so labels rendered by JS
-  // (e.g. status text) pick up the right locale.
   document.documentElement.lang = getLang();
   applyTranslations();
   setStatus("connecting");
@@ -58,17 +74,18 @@ function init() {
 
   document.getElementById("timeline-clear")?.addEventListener("click", clearTimeline);
 
-  bindChat({
-    formId: "chat-form",
-    inputId: "chat-input",
-    logId: "chat-log",
-  });
-
+  bindTabs("activity");
+  bindChat({formId: "chat-form", inputId: "chat-input", logId: "chat-log"});
   bindSettings({
     toggleId: "settings-toggle",
     drawerId: "settings-drawer",
     formId: "settings-form",
   });
+
+  const evtBroker = makeBroker();
+  bindScans({onEvent: evtBroker.on});
+  bindWatches({onEvent: evtBroker.on});
+  bindTools({onEvent: evtBroker.on});
 
   probeBroker();
 
@@ -76,13 +93,13 @@ function init() {
     onOpen: () => setStatus("connected"),
     onClose: () => setStatus("disconnected"),
     onEvent: (evt) => {
-      // External-client → dashboard hand-off: don't render in timeline,
-      // run the chat injection instead.
       if (evt?.kind === "dashboard_chat_request") {
         handleDashboardChatRequest(evt);
         return;
       }
+      // Activity timeline gets every event; specialized panels filter on kind.
       appendEventRow(evt);
+      evtBroker.emit(evt);
     },
   });
 }

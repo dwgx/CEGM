@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -34,9 +35,12 @@ from cegm_broker import __version__, parent_watch
 from cegm_broker._logging import get_logger
 from cegm_broker.api import chat, config_get, config_put, health
 from cegm_broker.config import Config
+from cegm_broker.dynamic_tools import DynamicToolRegistry
 from cegm_broker.event_bus import Event, EventBus
 from cegm_broker.mcp_proxy import MCPProxy, ProxyConfig
 from cegm_broker.mcp_server import build_server
+from cegm_broker.scans import ScanRegistry
+from cegm_broker.watches import WatchRegistry
 from cegm_broker.ws import events_endpoint
 
 if TYPE_CHECKING:
@@ -50,15 +54,44 @@ _log = get_logger(__name__)
 _WEB_DIR: Path = Path(__file__).resolve().parents[3] / "web"
 
 
-def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]
+def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]  # noqa: PLR0915
     """Build a lifespan context manager bound to a particular ``parent_pid``."""
 
     @asynccontextmanager
-    async def lifespan(app: Starlette) -> AsyncIterator[None]:
+    async def lifespan(app: Starlette) -> AsyncIterator[None]:  # noqa: PLR0915
         config = Config.load()
         bus = EventBus()
         proxy = MCPProxy(ProxyConfig.from_env())
         await proxy.start()  # graceful failure if upstream isn't reachable
+
+        scans = ScanRegistry()
+        dynamic = DynamicToolRegistry()
+
+        async def _read_value(address: str, vt: str) -> object:
+            """Bridge the watch poller into the MCP proxy's read_memory family."""
+            if not proxy.available:
+                raise RuntimeError("proxy unavailable")
+            if vt == "float":
+                tool = "read_float"
+            elif vt == "double":
+                tool = "read_double"
+            elif vt == "string":
+                tool = "read_string"
+            else:
+                tool = "read_integer"
+            res = await proxy.call_tool(tool, {"address": address})
+            for block in res.content:
+                text = getattr(block, "text", None)
+                if text:
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError:
+                        return text
+            return None
+
+        watches = WatchRegistry(bus=bus, reader=_read_value)
+        watches.start()
+
         await bus.publish(
             Event.make(
                 "broker_status",
@@ -68,11 +101,12 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]
                     "proxy_available": proxy.available,
                     "proxy_tool_count": len(proxy.tools),
                     "proxy_error": proxy.error,
+                    "custom_tool_count": len(dynamic.all()),
                 },
             )
         )
 
-        mcp_server = build_server(proxy, bus)
+        mcp_server = build_server(proxy, bus, scans=scans, watches=watches, dynamic=dynamic)
         session_mgr = StreamableHTTPSessionManager(
             mcp_server,
             json_response=True,
@@ -84,6 +118,9 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]
             app.state.config = config
             app.state.bus = bus
             app.state.proxy = proxy
+            app.state.scans = scans
+            app.state.watches = watches
+            app.state.dynamic = dynamic
             app.state.mcp_session_mgr = session_mgr
 
             if parent_pid is not None:
@@ -95,6 +132,7 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]
                     "version": __version__,
                     "port": config.server.port,
                     "proxy_available": proxy.available,
+                    "custom_tool_count": len(dynamic.all()),
                 },
             )
             try:
@@ -104,6 +142,7 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]
                     watcher_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await watcher_task
+                await watches.stop()
                 await proxy.stop()
                 _log.info("broker.lifespan_stopped")
 

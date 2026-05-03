@@ -14,52 +14,59 @@ in :mod:`cegm_broker.server`, then mounted into the Starlette app at
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from mcp import types
 from mcp.server.lowlevel import Server
 
 from cegm_broker import __version__
 from cegm_broker._logging import get_logger
+from cegm_broker.dynamic_tools import DynamicToolRegistry
 from cegm_broker.event_bus import Event, EventBus
 from cegm_broker.mcp_extras import EXTRAS_TOOL_DEFS, is_extra
 from cegm_broker.mcp_extras import dispatch as dispatch_extra
 from cegm_broker.mcp_proxy import MCPProxy
+from cegm_broker.scans import ScanRegistry
+from cegm_broker.watches import WatchRegistry
 
 _log = get_logger(__name__)
 
 
-def build_server(proxy: MCPProxy, bus: EventBus) -> Server:
-    """Construct an MCP :class:`Server` that proxies ``proxy`` and serves CEGM extras.
-
-    The returned server is *not* started; the caller is expected to wrap it
-    in a :class:`StreamableHTTPSessionManager` (for HTTP) or hand it to
-    ``server.run`` (for stdio).
-    """
+def build_server(
+    proxy: MCPProxy,
+    bus: EventBus,
+    *,
+    scans: ScanRegistry,
+    watches: WatchRegistry,
+    dynamic: DynamicToolRegistry,
+) -> Server:
+    """Construct an MCP :class:`Server` that proxies ``proxy`` and serves CEGM extras."""
     # The MCP SDK's ``Server.__init__`` is missing parameter type hints in
     # this release; the call shape is correct but mypy --strict can't verify it.
     server: Server = Server("cegm-broker", version=__version__)
 
     @server.list_tools()  # type: ignore[no-untyped-call, untyped-decorator]
     async def _list_tools() -> list[types.Tool]:
-        # Order: upstream first (familiar to power users), then our extras.
-        return [*proxy.tools, *EXTRAS_TOOL_DEFS]
+        # Order: upstream first (familiar to power users), then our static
+        # extras, then any user-defined custom.* tools.
+        return [*proxy.tools, *EXTRAS_TOOL_DEFS, *dynamic.mcp_tools()]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
     async def _call_tool(
-        name: str, arguments: dict[str, object]
+        name: str, arguments: dict[str, Any]
     ) -> Sequence[types.ContentBlock] | types.CallToolResult:
-        """Dispatch a single ``tools/call`` to either a CEGM extra or upstream.
-
-        Upstream tools return :class:`~mcp.types.CallToolResult` so the SDK
-        sees both ``content`` and ``structuredContent`` (required when the
-        upstream tool declares an ``outputSchema``). CEGM extras return
-        plain content blocks since they don't declare structured outputs.
-        """
+        """Dispatch a single ``tools/call`` to either a CEGM extra or upstream."""
         await bus.publish(Event.make("tool_called", {"name": name, "arguments": arguments}))
         try:
             if is_extra(name):
                 result: Sequence[types.ContentBlock] | types.CallToolResult = await dispatch_extra(
-                    name, arguments, bus
+                    name,
+                    arguments,
+                    bus=bus,
+                    proxy=proxy,
+                    scans=scans,
+                    watches=watches,
+                    dynamic=dynamic,
                 )
             else:
                 if not proxy.available:

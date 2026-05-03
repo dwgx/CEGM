@@ -122,11 +122,23 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
 
     tools = [*proxy.tools, *EXTRAS_TOOL_DEFS]
 
+    scans = request.app.state.scans
+    watches = request.app.state.watches
+    dynamic = request.app.state.dynamic
+
     async def dispatcher(name: str, args: dict[str, Any]) -> list[Any]:
         await bus.publish(Event.make("tool_called", {"name": name, "arguments": args}))
         try:
             if is_extra(name):
-                content = await dispatch_extra(name, args, bus)
+                content = await dispatch_extra(
+                    name,
+                    args,
+                    bus=bus,
+                    proxy=proxy,
+                    scans=scans,
+                    watches=watches,
+                    dynamic=dynamic,
+                )
             else:
                 if not proxy.available:
                     raise RuntimeError(f"upstream MCP not connected; cannot dispatch {name!r}")
