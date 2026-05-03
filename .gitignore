@@ -61,3 +61,11 @@ secrets/
 release/
 out/
 target/
+
+# --- C plugin build artifacts (plugin/native/) ---
+*.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+plugin/native/dist/
