@@ -157,6 +157,39 @@
         </fieldset>
 
         <fieldset>
+          <legend class="mb-2 font-semibold">MCP endpoint</legend>
+          <p class="mb-2 text-xs text-zinc-400">
+            Point any MCP client (Claude Desktop, Cursor, Codex, Claude Code) at this URL.
+            No per-host setup needed — as long as Cheat Engine is running, the URL is live.
+          </p>
+          <div class="flex gap-2">
+            <input
+              id="mcp-url"
+              type="text"
+              readonly
+              class="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
+            />
+            <button
+              type="button"
+              id="mcp-url-copy"
+              class="rounded border border-zinc-700 px-3 text-xs hover:bg-zinc-800"
+            >Copy</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend class="mb-2 font-semibold">Cheat Engine UI</legend>
+          <label class="flex items-center gap-2">
+            <input name="show_status_form" type="checkbox" class="h-4 w-4 accent-emerald-600" />
+            <span>Show CEGM status window on Cheat Engine startup</span>
+          </label>
+          <p class="mt-1 text-xs text-zinc-500">
+            Off — broker still auto-spawns, just no popup. Open this dashboard via the
+            "Open CEGM Dashboard" main-menu item from the C plugin.
+          </p>
+        </fieldset>
+
+        <fieldset>
           <legend class="mb-2 font-semibold">Safety</legend>
           <label class="flex items-center gap-2">
             <input name="preview_writes_default" type="checkbox" class="h-4 w-4 accent-emerald-600" />

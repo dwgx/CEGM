@@ -54,6 +54,22 @@ class SafetyConfig(BaseModel):
     snapshot_on_first_write: bool = True
 
 
+class UIConfig(BaseModel):
+    """In-CE UX toggles read by ``plugin/cegm.lua`` at autorun time.
+
+    These are server-side because the dashboard is the single source of
+    truth for user preferences — the Lua plugin reads
+    ``%LOCALAPPDATA%\\CEGM\\config.json`` on each CE start.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    show_status_form: bool = True
+    """If False, the floating "CEGM 0.1.0a1" status form is suppressed
+    on CE startup. The user can still open the dashboard via the C
+    plugin's main-menu entry or by visiting the URL directly."""
+
+
 class ServerConfig(BaseModel):
     """Listen-port and bind-host configuration.
 
@@ -76,6 +92,7 @@ class Config(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
 
     @classmethod
     def load(cls) -> Self:

@@ -30,11 +30,12 @@ end)()
 -- Make plugin/lib/ requireable.
 package.path = SCRIPT_DIR .. "lib/?.lua;" .. package.path
 
-local paths       = require("paths")
-local log         = require("log")
-local port_probe  = require("port_probe")
-local spawn       = require("spawn")
-local ui          = require("ui")
+local paths         = require("paths")
+local log           = require("log")
+local port_probe    = require("port_probe")
+local spawn         = require("spawn")
+local ui            = require("ui")
+local config_reader = require("config_reader")
 
 local DEFAULT_PORT = 27077
 local PROBE_TIMEOUT_MS = 3000  -- give broker up to 3s to start binding
@@ -45,10 +46,13 @@ local PROBE_TIMEOUT_MS = 3000  -- give broker up to 3s to start binding
 ---@field broker_pid integer|nil
 ---@field last_check_ts integer  -- os.time() of last health probe
 
----Pick the broker port for this session. Currently a constant; reads from
----config will land in Phase 1 once the JSON loader is wired.
+---Pick the broker port for this session, honoring any override in
+---``config.json``.
+---@param cfg table -- result of config_reader.load()
 ---@return integer
-local function chosen_port()
+local function chosen_port(cfg)
+  local p = cfg.server and tonumber(cfg.server.port)
+  if p and p > 0 and p <= 65535 then return math.floor(p) end
   return DEFAULT_PORT
 end
 
@@ -64,14 +68,19 @@ local function our_pid()
 end
 
 ---Initialize CEGM state and run the spawn flow.
----@return CegmState
+---@return CegmState, table
 local function bootstrap()
   paths.ensure_data_root()
-  log.info("cegm.bootstrap_started", { port = chosen_port() })
+  local cfg = config_reader.load()
+  local port = chosen_port(cfg)
+  log.info("cegm.bootstrap_started", {
+    port = port,
+    show_status_form = cfg.ui.show_status_form,
+  })
 
   ---@type CegmState
   local state = {
-    port = chosen_port(),
+    port = port,
     broker_running = false,
     broker_pid = nil,
     last_check_ts = os.time(),
@@ -92,7 +101,7 @@ local function bootstrap()
     end
   end
 
-  return state
+  return state, cfg
 end
 
 -- Defer GUI work to the next event-loop tick (recommended pattern from
@@ -101,7 +110,11 @@ local boot_timer = createTimer(getMainForm() or nil, false)
 boot_timer.Interval = 1
 boot_timer.OnTimer = function(self)
   self.destroy()
-  local state = bootstrap()
-  ui.show_status_form(state)
+  local state, cfg = bootstrap()
+  if cfg.ui.show_status_form then
+    ui.show_status_form(state)
+  else
+    log.info("cegm.status_form_suppressed")
+  end
 end
 boot_timer.Enabled = true
