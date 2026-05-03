@@ -31,7 +31,6 @@ end)()
 package.path = SCRIPT_DIR .. "lib/?.lua;" .. package.path
 
 local log           = require("log")
-local spawn         = require("spawn")
 local ui            = require("ui")
 local config_reader = require("config_reader")
 
@@ -53,26 +52,18 @@ local function chosen_port(cfg)
   return DEFAULT_PORT
 end
 
----Get our own (Cheat Engine's) PID for the parent-watch handshake.
----@return integer
-local function our_pid()
-  -- CE exposes this via the global `getCEProcessID()` in 7.5+; fall back to
-  -- whatever's available on older builds.
-  if type(_G.getCEProcessID) == "function" then
-    return _G.getCEProcessID()
-  end
-  return 0
-end
 
----Initialize CEGM state and run the spawn flow.
----
----We always attempt to spawn ``cegm-broker``; if a broker is already
----listening on the configured port, the new process exits silently
----when its bind fails. This avoids any pre-flight probe — checking the
----port from Lua requires shelling out to PowerShell (slow + flashing
----console window) and the marginal benefit isn't worth it. Once the
----native C plugin (plugin/native/CEGM-x64.dll) is enabled, spawn moves
----there and runs without any console flash at all.
+---Initialize CEGM state. The Lua plugin no longer spawns the broker —
+---that responsibility belongs to either:
+---  1. The native C plugin (``plugin/native/CEGM-x64.dll``), which can
+---     ``CreateProcessW`` ``cegm-broker.exe`` with ``CREATE_NO_WINDOW``
+---     once it's resolved on PATH; or
+---  2. The user, running ``cegm-broker --port 27077`` manually.
+---Spawning from Lua via ``os.execute`` always goes through ``cmd.exe``
+---and pops a "command not found" dialog when the binary isn't on PATH
+---(common when the user is iterating with ``uv run`` rather than
+---``uv tool install``). Better to do nothing and let the broker reach
+---the user via one of the two paths above.
 ---@return CegmState, table
 local function bootstrap()
   local cfg = config_reader.load()
@@ -82,20 +73,10 @@ local function bootstrap()
     show_status_form = cfg.ui.show_status_form,
   })
 
-  local ok, err = spawn.detached_broker({
-    port = port,
-    parent_pid = our_pid(),
-  })
-  if not ok then
-    log.error("cegm.spawn_failed", { err = tostring(err) })
-  else
-    log.info("cegm.broker_spawn_attempted", { port = port, parent_pid = our_pid() })
-  end
-
   ---@type CegmState
   local state = {
     port = port,
-    broker_running = ok or false,
+    broker_running = false,  -- unknown; we don't probe (would require shell-out)
     broker_pid = nil,
     last_check_ts = os.time(),
   }
