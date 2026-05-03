@@ -3,16 +3,17 @@
 
   Loaded automatically by Cheat Engine when this file lives in
     <CE>/autorun/CEGM/cegm.lua
+  via the top-level <CE>/autorun/cegm_loader.lua bootstrap.
 
-  Responsibilities (intentionally minimal — heavy lifting is in the broker):
-    1. Probe whether the CEGM broker is already running.
-    2. If not, spawn `cegm-broker.exe` detached, passing CE's PID so the broker
-       exits when CE exits.
-    3. Open a small floating status form with an "Open Dashboard" button that
-       launches the user's default browser at http://127.0.0.1:<port>/.
+  Responsibilities (intentionally tiny):
+    1. Read config from %LOCALAPPDATA%/CEGM/config.json.
+    2. If ``ui.show_status_form`` is true, open the floating status form.
+       Otherwise, do nothing — broker spawn is handled either by the C
+       plugin (plugin/native/CEGM-x64.dll, silent CreateProcessW) or by
+       the user starting ``cegm-broker`` manually.
 
-  This file MUST stay strictly main-thread. No memory scans here. No blocking
-  network calls. No `sleep`. The broker does all of that.
+  This file MUST stay strictly main-thread. No shell-outs. No blocking
+  network calls. No `sleep`.
 
   Vendored alongside this script (copied at install time):
     ce_mcp_bridge.lua  — from miscusi-peek/cheatengine-mcp-bridge (MIT)
