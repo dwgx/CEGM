@@ -89,6 +89,9 @@ class MCPProxy:
         self._tools: list[types.Tool] = []
         self._available: bool = False
         self._error: str | None = None
+        # Serializes start/stop so concurrent callers can't spawn the
+        # child twice or race teardown against startup.
+        self._lifecycle_lock: asyncio.Lock = asyncio.Lock()
 
     @property
     def available(self) -> bool:
@@ -108,60 +111,70 @@ class MCPProxy:
     async def start(self) -> None:
         """Spawn the child and complete the MCP handshake.
 
-        Idempotent: a second call after success is a no-op. On failure the
-        proxy is left in an "unavailable" state and any partially-acquired
-        resources are released; the broker can keep running.
+        Idempotent and concurrency-safe: serialized via an ``asyncio.Lock``
+        so two callers racing here can't double-spawn the child or leak
+        the first one's stdio descriptors. On failure the proxy is left
+        in an "unavailable" state and any partially-acquired resources
+        are released; the broker can keep running.
         """
-        if self._available:
-            return
+        async with self._lifecycle_lock:
+            if self._available:
+                return
 
-        if not self._config.entry_script.is_file():
-            self._error = f"entry script missing: {self._config.entry_script}"
-            _log.warning("mcp_proxy.entry_missing", extra={"path": str(self._config.entry_script)})
-            return
+            if not self._config.entry_script.is_file():
+                self._error = f"entry script missing: {self._config.entry_script}"
+                _log.warning(
+                    "mcp_proxy.entry_missing",
+                    extra={"path": str(self._config.entry_script)},
+                )
+                return
 
-        stack = AsyncExitStack()
-        try:
-            params = StdioServerParameters(
-                command=self._config.python_executable,
-                args=[str(self._config.entry_script)],
-            )
-            read, write = await stack.enter_async_context(stdio_client(params))
-            session = await stack.enter_async_context(ClientSession(read, write))
-            await asyncio.wait_for(
-                session.initialize(),
-                timeout=self._config.handshake_timeout_s,
-            )
-            result = await session.list_tools()
+            stack = AsyncExitStack()
+            try:
+                params = StdioServerParameters(
+                    command=self._config.python_executable,
+                    args=[str(self._config.entry_script)],
+                )
+                read, write = await stack.enter_async_context(stdio_client(params))
+                session = await stack.enter_async_context(ClientSession(read, write))
+                await asyncio.wait_for(
+                    session.initialize(),
+                    timeout=self._config.handshake_timeout_s,
+                )
+                result = await session.list_tools()
 
-            self._stack = stack
-            self._session = session
-            self._tools = list(result.tools)
-            self._available = True
-            self._error = None
-            _log.info(
-                "mcp_proxy.connected",
-                extra={"tool_count": len(self._tools), "entry": str(self._config.entry_script)},
-            )
-        except Exception as exc:
-            self._error = repr(exc)
-            self._available = False
-            await stack.aclose()
-            _log.warning(
-                "mcp_proxy.unavailable",
-                extra={"err": self._error},
-            )
+                self._stack = stack
+                self._session = session
+                self._tools = list(result.tools)
+                self._available = True
+                self._error = None
+                _log.info(
+                    "mcp_proxy.connected",
+                    extra={
+                        "tool_count": len(self._tools),
+                        "entry": str(self._config.entry_script),
+                    },
+                )
+            except Exception as exc:
+                self._error = repr(exc)
+                self._available = False
+                await stack.aclose()
+                _log.warning(
+                    "mcp_proxy.unavailable",
+                    extra={"err": self._error},
+                )
 
     async def stop(self) -> None:
         """Terminate the child cleanly. Safe to call multiple times."""
-        if self._stack is None:
-            return
-        try:
-            await self._stack.aclose()
-        finally:
-            self._stack = None
-            self._session = None
-            self._available = False
+        async with self._lifecycle_lock:
+            if self._stack is None:
+                return
+            try:
+                await self._stack.aclose()
+            finally:
+                self._stack = None
+                self._session = None
+                self._available = False
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> types.CallToolResult:
         """Forward a ``tools/call`` to the upstream child.

@@ -158,9 +158,12 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
             err_evt = {"type": "error", "error": repr(exc)}
             _log.warning("api.chat_stream_error", extra={"err": repr(exc)})
             yield f"data: {json.dumps(err_evt)}\n\n".encode()
-        else:
-            await bus.publish(Event.make("chat_assistant", {"content": full_text}))
         finally:
+            # Always publish the assistant turn — even if the stream
+            # errored mid-flight — so the timeline stays consistent with
+            # the chat_user event we already published.
+            if full_text:
+                await bus.publish(Event.make("chat_assistant", {"content": full_text}))
             yield b"data: [DONE]\n\n"
 
     return StreamingResponse(

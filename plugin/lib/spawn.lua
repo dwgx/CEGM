@@ -14,15 +14,28 @@ local M = {}
 ---@field parent_pid integer
 ---@field log_level string|nil
 
+local VALID_LOG_LEVELS = {
+  debug = true, info = true, warning = true, error = true, critical = true,
+}
+
 ---Detach `cegm-broker` with the given arguments. Fire-and-forget; we do
 ---not capture stdout/stderr (broker logs to its own JSONL file).
+---
+---All arguments are coerced to safe forms before being interpolated into
+---the shell command — `port` and `parent_pid` are forced to integers via
+---`%d` formatting, and `log_level` is whitelisted against the broker's
+---known set so a malicious caller can't smuggle shell metacharacters in.
+---
 ---@param args SpawnArgs
 ---@return boolean ok, string|nil err
 function M.detached_broker(args)
   if type(args) ~= "table" then return false, "args must be a table" end
-  local port = args.port or 27077
-  local parent_pid = args.parent_pid or 0
-  local log_level = args.log_level or "info"
+  local port = math.floor(tonumber(args.port) or 27077)
+  local parent_pid = math.floor(tonumber(args.parent_pid) or 0)
+  local log_level = args.log_level
+  if not (type(log_level) == "string" and VALID_LOG_LEVELS[log_level]) then
+    log_level = "info"
+  end
 
   -- `start "" /B` runs without a new console window and without title
   -- shadowing. The empty title arg ("") is required to disambiguate

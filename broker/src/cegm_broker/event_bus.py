@@ -13,6 +13,7 @@ The bus also keeps a bounded ring-buffer of recent events so the
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,6 +31,10 @@ _SUB_QUEUE_MAX: Final[int] = 1024
 # Default history window for ``recent()`` — sized so a 30-minute
 # tool-heavy session still fits.
 _DEFAULT_HISTORY_SIZE: Final[int] = 500
+
+# Sentinel pushed onto a subscriber's queue when the bus wants its
+# ``_iter`` consumer to exit cleanly (overflow, scope close).
+_POISON: Final[object] = object()
 
 
 class Event(dict[str, Any]):
@@ -57,7 +62,9 @@ class _Subscription:
     __slots__ = ("alive", "queue")
 
     def __init__(self) -> None:
-        self.queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=_SUB_QUEUE_MAX)
+        # ``Event | object`` because we also push the ``_POISON`` sentinel
+        # onto this queue to wake up consumers waiting on ``queue.get()``.
+        self.queue: asyncio.Queue[Event | object] = asyncio.Queue(maxsize=_SUB_QUEUE_MAX)
         self.alive: bool = True
 
 
@@ -72,10 +79,11 @@ class EventBus:
     async def publish(self, event: Event) -> None:
         """Append to history, then fan out to every live subscriber.
 
-        If a subscriber's queue is full we mark it dead and drop the event
-        for that subscriber only. Other subscribers still receive normally.
-        History is appended unconditionally so :meth:`recent` reflects every
-        event regardless of subscriber liveness.
+        If a subscriber's queue is full we mark it dead, drop a poison-pill
+        sentinel onto its queue (so the consumer's ``await queue.get()``
+        wakes up and exits cleanly), and discard it. Other subscribers
+        still receive normally. History is appended unconditionally so
+        :meth:`recent` reflects every event regardless of subscriber liveness.
         """
         async with self._lock:
             self._history.append(event)
@@ -85,6 +93,7 @@ class EventBus:
                     sub.queue.put_nowait(event)
                 except asyncio.QueueFull:
                     sub.alive = False
+                    self._poison(sub)
                     dead.append(sub)
                     _log.warning("event_bus.subscriber_overflow")
             for sub in dead:
@@ -102,11 +111,26 @@ class EventBus:
             sub.alive = False
             async with self._lock:
                 self._subs.discard(sub)
+                # Wake any pending ``queue.get()`` so the iterator exits
+                # cleanly even if it's blocked at the moment the consumer
+                # context exits.
+                self._poison(sub)
+
+    @staticmethod
+    def _poison(sub: _Subscription) -> None:
+        """Best-effort sentinel push so ``_iter`` can break out of ``queue.get()``."""
+        with contextlib.suppress(asyncio.QueueFull):
+            sub.queue.put_nowait(_POISON)
 
     @staticmethod
     async def _iter(sub: _Subscription) -> AsyncIterator[Event]:
-        while sub.alive:
+        while True:
             evt = await sub.queue.get()
+            if evt is _POISON or not sub.alive:
+                return
+            # Narrow Event | object back to Event — only ``_POISON`` is the
+            # non-Event sentinel and we returned above when we saw it.
+            assert isinstance(evt, Event)
             yield evt
 
     @property

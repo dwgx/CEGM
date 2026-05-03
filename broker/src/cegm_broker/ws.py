@@ -32,12 +32,11 @@ async def events_endpoint(websocket: WebSocket) -> None:
     _log.info("ws.connected", extra={"subscribers_after": bus.subscriber_count + 1})
 
     try:
-        # Replay recent history so the client doesn't see a "blank" timeline
-        # right after reload.
-        for past in bus.recent(_REPLAY_LIMIT):
-            await websocket.send_json(past)
-
+        # Subscribe BEFORE replaying so events published in the gap between
+        # the two operations land on our queue rather than being dropped.
         async with bus.subscribe() as stream:
+            for past in bus.recent(_REPLAY_LIMIT):
+                await websocket.send_json(past)
             async for event in stream:
                 await websocket.send_json(event)
     except WebSocketDisconnect:

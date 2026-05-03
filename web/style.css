@@ -2,6 +2,15 @@
    classes inline; this file is for the few things Tailwind can't easily
    express. Keep small. */
 
+/* Force the HTML `hidden` attribute to win over Tailwind utilities like
+   `flex` / `block` that share the same display-property cascade level.
+   Without this, `<aside hidden class="flex …">` renders as flex because
+   Tailwind's stylesheet comes after the UA `[hidden] { display: none }`
+   rule at the same specificity. */
+[hidden] {
+  display: none !important;
+}
+
 /* Hide native scrollbars in WebKit/Chromium when scrolling auto-fades. */
 .scroll-fade::-webkit-scrollbar {
   width: 8px;

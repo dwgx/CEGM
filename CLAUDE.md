@@ -39,6 +39,10 @@ Phase 0 (foundation) complete. **Phase 1** is the closed-loop MVP — see [docs/
 - Bumping the miscusi-peek submodule → run `git submodule update --remote vendor/cheatengine-mcp-bridge`, smoke-test `tools/list` against the new commit, update the pinned-commit reference in ADR-0004.
 - CE Lua API doubts → first check [docs/research/ce-lua-api.md](docs/research/ce-lua-api.md). MCP doubts → [docs/research/mcp-python-sdk.md](docs/research/mcp-python-sdk.md). Both are research snapshots from 2026-05-03; cross-check the linked authoritative source before relying.
 
+## Known constraints
+
+- **`parent_watch.watch()` shutdown signal on Windows** is `signal.raise_signal(SIGINT)`, which Python translates to `GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)` — that broadcasts to the whole console process group, including the spawned miscusi-peek child. In practice this is fine because the broker's lifespan teardown closes the child's stdio anyway, but don't rely on the child running cleanup code after CE exits. If a tighter handoff is ever needed, plumb the uvicorn `Server` instance into `parent_watch` and flip `should_exit = True` directly.
+
 ## Things not to do
 
 - **Don't reimplement miscusi-peek's tools.** Our value is the layer above. If a tool is missing or buggy, file an issue upstream or extend with a `cegm.*`-namespaced wrapper.

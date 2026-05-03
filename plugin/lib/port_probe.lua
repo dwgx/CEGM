@@ -31,13 +31,31 @@ local function marker_fresh(port)
   return tonumber(listed_port) == port
 end
 
+---True if `s` is a safe host literal — IPv4 dotted-quad or `localhost`.
+---Anything else is rejected before we let it near a shell command line.
+---@param s string
+---@return boolean
+local function is_safe_host(s)
+  if type(s) ~= "string" then return false end
+  if s == "localhost" then return true end
+  local a, b, c, d = s:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+  if not a then return false end
+  for _, n in ipairs({ a, b, c, d }) do
+    local v = tonumber(n)
+    if not v or v < 0 or v > 255 then return false end
+  end
+  return true
+end
+
 ---PowerShell-based TCP probe. Returns true if connect to host:port succeeds
----within `timeout_ms`.
+---within `timeout_ms`. ``host`` is validated upstream; ``port`` and
+---``timeout_ms`` are forced to integers via ``%d`` formatting.
 ---@param host string
 ---@param port integer
 ---@param timeout_ms integer
 ---@return boolean
 local function tcp_connect(host, port, timeout_ms)
+  if not is_safe_host(host) then return false end
   -- The .NET TcpClient is stock on every Windows that has CE 7.5 working.
   -- Single round-trip; window is hidden via -WindowStyle Hidden so the user
   -- doesn't see a flash. We capture the exit code only.
@@ -47,7 +65,7 @@ local function tcp_connect(host, port, timeout_ms)
     'try { $r=$c.BeginConnect(\'%s\',%d,$null,$null); ' ..
     'if($r.AsyncWaitHandle.WaitOne(%d)) { $c.EndConnect($r); exit 0 } ' ..
     'else { exit 1 } } catch { exit 1 } finally { $c.Close() }"',
-    host, port, timeout_ms
+    host, math.floor(port), math.floor(timeout_ms)
   )
   local ok, _, code = os.execute(cmd)
   -- Lua 5.3's `os.execute` returns (true|false, "exit"|"signal", code).

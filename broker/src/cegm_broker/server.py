@@ -131,9 +131,7 @@ class _MCPRouteApp:
             if scope["type"] != "http":
                 return
             await send({"type": "http.response.start", "status": 503, "headers": []})
-            await send(
-                {"type": "http.response.body", "body": b"MCP session manager not ready"}
-            )
+            await send({"type": "http.response.body", "body": b"MCP session manager not ready"})
             return
         await session_mgr.handle_request(scope, receive, send)
 
