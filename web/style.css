@@ -1,0 +1,43 @@
+/* CEGM dashboard custom CSS overrides. Most styling is Tailwind utility
+   classes inline; this file is for the few things Tailwind can't easily
+   express. Keep small. */
+
+/* Hide native scrollbars in WebKit/Chromium when scrolling auto-fades. */
+.scroll-fade::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-fade::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+}
+.scroll-fade::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* When the connection dot turns green/red/amber the surrounding text
+   inherits that color; users with dyschromatopsia still get the textual
+   "connected" / "disconnected" label. */
+[data-status="connected"] #status-dot {
+  background: #16a34a; /* emerald-600 */
+}
+[data-status="disconnected"] #status-dot {
+  background: #dc2626; /* red-600 */
+}
+[data-status="connecting"] #status-dot {
+  background: #f59e0b; /* amber-500 */
+}
+
+/* Diff highlighting in timeline rows. */
+.diff-add {
+  color: #4ade80; /* green-400 */
+}
+.diff-del {
+  color: #fca5a5; /* red-300 */
+}
+
+/* Reduced motion preference: disable the dot pulse animation. */
+@media (prefers-reduced-motion: reduce) {
+  #status-dot {
+    animation: none !important;
+  }
+}

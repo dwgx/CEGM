@@ -1,0 +1,163 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Project metadata (PEP 621)
+# ──────────────────────────────────────────────────────────────────────────────
+[project]
+name = "cegm-broker"
+version = "0.1.0a1"
+description = "CheatEngineGM broker — MCP HTTP server, browser dashboard, and LLM client over miscusi-peek/cheatengine-mcp-bridge."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-2.0-only"
+authors = [
+    { name = "dwgx", email = "somdhmtb@gmail.com" },
+]
+keywords = ["cheat-engine", "mcp", "llm", "claude", "memory-editor", "reverse-engineering"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Games/Entertainment",
+    "Topic :: Software Development :: Debuggers",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "mcp>=1.27.0",
+    "openai>=1.50.0",
+    "starlette>=0.42.0",
+    "uvicorn[standard]>=0.32.0",
+    "anyio>=4.6.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "httpx>=0.28.0",
+    "psutil>=6.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "types-psutil>=6.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/dwgx/CEGM"
+Repository = "https://github.com/dwgx/CEGM"
+Issues = "https://github.com/dwgx/CEGM/issues"
+
+[project.scripts]
+cegm-broker = "cegm_broker.__main__:main"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Build (hatch) — package the src layout
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.hatch.build.targets.wheel]
+packages = ["src/cegm_broker"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/cegm_broker", "tests", "README.md", "pyproject.toml"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Ruff — linter + formatter (replaces black + isort + flake8 + pyupgrade)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "S",   # flake8-bandit (security)
+    "A",   # flake8-builtins
+    "C4",  # flake8-comprehensions
+    "PT",  # flake8-pytest-style
+    "PIE", # flake8-pie
+    "RUF", # ruff-specific
+    "SIM", # flake8-simplify
+    "TID", # flake8-tidy-imports
+    "PL",  # pylint
+]
+ignore = [
+    "PLR0913", # too many args — Pydantic / FastMCP signatures get long
+    "S101",    # assert in tests is fine
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "PLR2004"]
+"src/cegm_broker/cli.py" = ["T201"] # print() OK in CLI
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Mypy — strict typing
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+disallow_any_unimported = true
+no_implicit_reexport = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["uvicorn.*", "mcp.*"]
+ignore_missing_imports = false
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pytest
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=cegm_broker",
+    "--cov-report=term-missing",
+    "--cov-fail-under=60",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:websockets.*",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["cegm_broker"]
+omit = ["src/cegm_broker/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" class="h-full bg-zinc-950 text-zinc-100">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>CEGM Dashboard</title>
+
+    <!--
+      Tailwind CDN (Play CDN). Phase 5 will replace this with a built bundle.
+      JIT mode keeps the page small even with many utility classes.
+    -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            fontFamily: {
+              mono: ['ui-monospace', 'SFMono-Regular', 'JetBrains Mono', 'monospace'],
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            },
+          },
+        },
+      };
+    </script>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+
+  <body class="h-full antialiased">
+    <div id="app" class="flex h-full flex-col">
+      <!-- Header -->
+      <header class="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/60 px-6 py-3 backdrop-blur">
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded bg-zinc-800 font-mono text-sm font-bold">CE</div>
+          <div>
+            <div class="font-semibold leading-tight">CheatEngineGM</div>
+            <div class="font-mono text-xs leading-tight text-zinc-400" data-bind="version">v0.1.0a1</div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2 text-sm">
+            <span id="status-dot" class="h-2 w-2 rounded-full bg-zinc-600 transition-colors"></span>
+            <span id="status-text" class="font-mono text-xs uppercase tracking-wider text-zinc-400">connecting</span>
+          </div>
+          <button
+            id="settings-toggle"
+            type="button"
+            class="rounded border border-zinc-700 px-3 py-1 text-sm hover:bg-zinc-800"
+            aria-controls="settings-drawer"
+          >Settings</button>
+        </div>
+      </header>
+
+      <!-- Main split: chat (left) + timeline (right) -->
+      <main class="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <!-- Chat column -->
+        <section class="flex min-h-0 flex-col border-r border-zinc-800">
+          <div
+            id="chat-log"
+            class="flex-1 space-y-3 overflow-y-auto p-6"
+            aria-live="polite"
+            aria-label="Chat history"
+          >
+            <p class="text-sm text-zinc-500">
+              Type a message below. Tool calls run against Cheat Engine and
+              show on the timeline as they happen.
+            </p>
+          </div>
+
+          <form id="chat-form" class="border-t border-zinc-800 bg-zinc-900/40 p-4">
+            <label for="chat-input" class="sr-only">Message</label>
+            <div class="flex gap-2">
+              <textarea
+                id="chat-input"
+                rows="2"
+                placeholder="Ask the model to find / read / write memory…"
+                class="flex-1 resize-none rounded border border-zinc-700 bg-zinc-950 px-3 py-2 font-sans text-sm focus:border-zinc-500 focus:outline-none"
+              ></textarea>
+              <button
+                type="submit"
+                class="self-end rounded bg-emerald-600 px-4 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
+              >Send</button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Timeline column -->
+        <section class="flex min-h-0 flex-col">
+          <div class="flex items-center justify-between border-b border-zinc-800 px-6 py-2">
+            <h2 class="font-mono text-xs uppercase tracking-wider text-zinc-400">Activity</h2>
+            <button
+              id="timeline-clear"
+              type="button"
+              class="font-mono text-xs uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
+            >clear</button>
+          </div>
+          <ol
+            id="timeline"
+            class="flex-1 overflow-y-auto p-4 font-mono text-xs"
+            aria-live="polite"
+            aria-label="Tool-call timeline"
+          >
+            <li class="text-zinc-600">— no activity yet —</li>
+          </ol>
+        </section>
+      </main>
+    </div>
+
+    <!-- Settings drawer (hidden by default) -->
+    <aside
+      id="settings-drawer"
+      hidden
+      class="fixed inset-y-0 right-0 z-30 flex w-full max-w-md flex-col border-l border-zinc-800 bg-zinc-950/95 shadow-2xl backdrop-blur"
+      aria-labelledby="settings-title"
+    >
+      <header class="flex items-center justify-between border-b border-zinc-800 px-6 py-3">
+        <h2 id="settings-title" class="text-sm font-semibold">Settings</h2>
+        <button
+          type="button"
+          data-close-drawer
+          class="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+        >Close</button>
+      </header>
+      <form id="settings-form" class="flex flex-1 flex-col gap-4 overflow-y-auto p-6 text-sm">
+        <fieldset>
+          <legend class="mb-2 font-semibold">LLM endpoint</legend>
+          <label class="block">
+            <span class="font-mono text-xs uppercase tracking-wider text-zinc-400">Base URL</span>
+            <input
+              name="base_url"
+              type="url"
+              class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
+              placeholder="https://api.deepseek.com/v1"
+            />
+          </label>
+          <label class="mt-3 block">
+            <span class="font-mono text-xs uppercase tracking-wider text-zinc-400">API key</span>
+            <input
+              name="api_key"
+              type="password"
+              autocomplete="off"
+              class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
+              placeholder="sk-…"
+            />
+          </label>
+          <label class="mt-3 block">
+            <span class="font-mono text-xs uppercase tracking-wider text-zinc-400">Model</span>
+            <input
+              name="model"
+              type="text"
+              class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
+              placeholder="deepseek-chat"
+            />
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend class="mb-2 font-semibold">Safety</legend>
+          <label class="flex items-center gap-2">
+            <input name="preview_writes_default" type="checkbox" class="h-4 w-4 accent-emerald-600" />
+            <span>Preview every memory write before applying</span>
+          </label>
+        </fieldset>
+
+        <button
+          type="submit"
+          class="mt-auto rounded bg-emerald-600 px-4 py-2 text-sm font-semibold hover:bg-emerald-500"
+        >Save</button>
+      </form>
+    </aside>
+
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>
