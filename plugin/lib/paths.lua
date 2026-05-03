@@ -33,13 +33,15 @@ function M.plugin_log_path() return M.data_root() .. "\\logs\\plugin.log" end
 ---@return string
 function M.broker_pid_path() return M.data_root() .. "\\broker.pid" end
 
----Create %LOCALAPPDATA%\CEGM\ and the logs/ subdirectory if missing.
+---No-op kept for backward compatibility.
+---
+---The original implementation ran ``cmd /c mkdir`` twice to create the
+---data root and its ``logs`` subdirectory; each call briefly flashed a
+---console window on Windows. The broker (Python) creates the same
+---directories on its first write, so we let it do that work and avoid
+---the visual noise on CE startup.
 function M.ensure_data_root()
-  local root = M.data_root()
-  -- `mkdir` on Windows ignores existing dirs but errors with garbage if path
-  -- has spaces unquoted. Use cmd /c to handle redirect of stderr safely.
-  os.execute(string.format('cmd /c mkdir "%s" 2>nul', root))
-  os.execute(string.format('cmd /c mkdir "%s\\logs" 2>nul', root))
+  -- intentionally empty
 end
 
 return M

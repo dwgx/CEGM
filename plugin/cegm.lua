@@ -30,15 +30,12 @@ end)()
 -- Make plugin/lib/ requireable.
 package.path = SCRIPT_DIR .. "lib/?.lua;" .. package.path
 
-local paths         = require("paths")
 local log           = require("log")
-local port_probe    = require("port_probe")
 local spawn         = require("spawn")
 local ui            = require("ui")
 local config_reader = require("config_reader")
 
 local DEFAULT_PORT = 27077
-local PROBE_TIMEOUT_MS = 3000  -- give broker up to 3s to start binding
 
 ---@class CegmState
 ---@field port integer
@@ -68,9 +65,16 @@ local function our_pid()
 end
 
 ---Initialize CEGM state and run the spawn flow.
+---
+---We always attempt to spawn ``cegm-broker``; if a broker is already
+---listening on the configured port, the new process exits silently
+---when its bind fails. This avoids any pre-flight probe — checking the
+---port from Lua requires shelling out to PowerShell (slow + flashing
+---console window) and the marginal benefit isn't worth it. Once the
+---native C plugin (plugin/native/CEGM-x64.dll) is enabled, spawn moves
+---there and runs without any console flash at all.
 ---@return CegmState, table
 local function bootstrap()
-  paths.ensure_data_root()
   local cfg = config_reader.load()
   local port = chosen_port(cfg)
   log.info("cegm.bootstrap_started", {
@@ -78,29 +82,23 @@ local function bootstrap()
     show_status_form = cfg.ui.show_status_form,
   })
 
+  local ok, err = spawn.detached_broker({
+    port = port,
+    parent_pid = our_pid(),
+  })
+  if not ok then
+    log.error("cegm.spawn_failed", { err = tostring(err) })
+  else
+    log.info("cegm.broker_spawn_attempted", { port = port, parent_pid = our_pid() })
+  end
+
   ---@type CegmState
   local state = {
     port = port,
-    broker_running = false,
+    broker_running = ok or false,
     broker_pid = nil,
     last_check_ts = os.time(),
   }
-
-  if port_probe.is_listening("127.0.0.1", state.port, 250) then
-    state.broker_running = true
-    log.info("cegm.broker_already_running", { port = state.port })
-  else
-    local ok, err = spawn.detached_broker({
-      port = state.port,
-      parent_pid = our_pid(),
-    })
-    if not ok then
-      log.error("cegm.spawn_failed", { err = tostring(err) })
-    else
-      log.info("cegm.broker_spawned", { port = state.port, parent_pid = our_pid() })
-    end
-  end
-
   return state, cfg
 end
 

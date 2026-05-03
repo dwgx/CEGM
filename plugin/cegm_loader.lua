@@ -46,10 +46,10 @@ local function bridge_log_path()
 end
 
 local LOG_PATH = bridge_log_path()
-do
-  local dir = LOG_PATH:match("^(.*)[\\/]")
-  if dir then os.execute('cmd /c mkdir "' .. dir .. '" 2>nul') end
-end
+-- Note: no ``mkdir`` shell-out here on purpose. Spawning ``cmd /c mkdir``
+-- briefly flashes a console window on Windows even with stderr redirected.
+-- If the directory doesn't exist, ``io.open`` below silently fails — the
+-- broker creates the directory on its own first write anyway.
 
 _G.print = function(...)
   local n = select("#", ...)
