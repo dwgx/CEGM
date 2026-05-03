@@ -56,3 +56,38 @@ async def test_unknown_extra_raises() -> None:
     bus = EventBus()
     with pytest.raises(KeyError):
         await dispatch("cegm.does_not_exist", {}, bus)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_chat_publishes_event() -> None:
+    """``cegm.dashboard_chat`` puts a ``dashboard_chat_request`` event on the bus."""
+    bus = EventBus(history_size=10)
+    content = await dispatch(
+        "cegm.dashboard_chat",
+        {"message": "find the HP value in notepad"},
+        bus,
+    )
+    assert len(content) == 1
+    block = content[0]
+    assert isinstance(block, types.TextContent)
+    payload = json.loads(block.text)
+    assert payload["ok"] is True
+    assert payload["url"].startswith("http://127.0.0.1:")
+
+    # The event itself reached the history buffer.
+    recent = bus.recent(5)
+    kinds = [e["kind"] for e in recent]
+    assert "dashboard_chat_request" in kinds
+    msg = next(e for e in recent if e["kind"] == "dashboard_chat_request")
+    assert msg["data"]["message"] == "find the HP value in notepad"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_chat_rejects_empty_message() -> None:
+    bus = EventBus()
+    with pytest.raises(ValueError, match="non-empty"):
+        await dispatch("cegm.dashboard_chat", {"message": ""}, bus)
+    with pytest.raises(ValueError, match="non-empty"):
+        await dispatch("cegm.dashboard_chat", {"message": "   "}, bus)
+    with pytest.raises(ValueError, match="non-empty"):
+        await dispatch("cegm.dashboard_chat", {}, bus)

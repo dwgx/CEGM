@@ -39,14 +39,22 @@
           </div>
         </div>
 
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3">
           <div class="flex items-center gap-2 text-sm">
             <span id="status-dot" class="h-2 w-2 rounded-full bg-zinc-600 transition-colors"></span>
-            <span id="status-text" class="font-mono text-xs uppercase tracking-wider text-zinc-400">connecting</span>
+            <span id="status-text" data-i18n="header.connecting" class="font-mono text-xs uppercase tracking-wider text-zinc-400">connecting</span>
           </div>
+          <button
+            id="lang-toggle"
+            type="button"
+            data-i18n="header.lang_toggle"
+            data-i18n-title="header.lang_toggle_title"
+            class="rounded border border-zinc-700 px-2 py-1 font-mono text-xs hover:bg-zinc-800"
+          >中文</button>
           <button
             id="settings-toggle"
             type="button"
+            data-i18n="header.settings"
             class="rounded border border-zinc-700 px-3 py-1 text-sm hover:bg-zinc-800"
             aria-controls="settings-drawer"
           >Settings</button>
@@ -61,25 +69,26 @@
             id="chat-log"
             class="flex-1 space-y-3 overflow-y-auto p-6"
             aria-live="polite"
-            aria-label="Chat history"
+            data-i18n-aria-label="chat.welcome"
           >
-            <p class="text-sm text-zinc-500">
-              Type a message below. Tool calls run against Cheat Engine and
-              show on the timeline as they happen.
+            <p data-i18n="chat.welcome" class="text-sm text-zinc-500">
+              Type a message below. Tool calls run against Cheat Engine and show on the timeline as they happen.
             </p>
           </div>
 
           <form id="chat-form" class="border-t border-zinc-800 bg-zinc-900/40 p-4">
-            <label for="chat-input" class="sr-only">Message</label>
+            <label for="chat-input" class="sr-only" data-i18n="chat.send">Message</label>
             <div class="flex gap-2">
               <textarea
                 id="chat-input"
                 rows="2"
+                data-i18n-placeholder="chat.placeholder"
                 placeholder="Ask the model to find / read / write memory…"
                 class="flex-1 resize-none rounded border border-zinc-700 bg-zinc-950 px-3 py-2 font-sans text-sm focus:border-zinc-500 focus:outline-none"
               ></textarea>
               <button
                 type="submit"
+                data-i18n="chat.send"
                 class="self-end rounded bg-emerald-600 px-4 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
               >Send</button>
             </div>
@@ -89,10 +98,11 @@
         <!-- Timeline column -->
         <section class="flex min-h-0 flex-col">
           <div class="flex items-center justify-between border-b border-zinc-800 px-6 py-2">
-            <h2 class="font-mono text-xs uppercase tracking-wider text-zinc-400">Activity</h2>
+            <h2 data-i18n="activity.title" class="font-mono text-xs uppercase tracking-wider text-zinc-400">Activity</h2>
             <button
               id="timeline-clear"
               type="button"
+              data-i18n="activity.clear"
               class="font-mono text-xs uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
             >clear</button>
           </div>
@@ -100,9 +110,8 @@
             id="timeline"
             class="flex-1 overflow-y-auto p-4 font-mono text-xs"
             aria-live="polite"
-            aria-label="Tool-call timeline"
           >
-            <li class="text-zinc-600">— no activity yet —</li>
+            <li data-i18n="activity.empty" class="text-zinc-600">— no activity yet —</li>
           </ol>
         </section>
       </main>
@@ -116,18 +125,19 @@
       aria-labelledby="settings-title"
     >
       <header class="flex items-center justify-between border-b border-zinc-800 px-6 py-3">
-        <h2 id="settings-title" class="text-sm font-semibold">Settings</h2>
+        <h2 id="settings-title" data-i18n="settings.title" class="text-sm font-semibold">Settings</h2>
         <button
           type="button"
           data-close-drawer
+          data-i18n="settings.close"
           class="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
         >Close</button>
       </header>
       <form id="settings-form" class="flex flex-1 flex-col gap-4 overflow-y-auto p-6 text-sm">
         <fieldset>
-          <legend class="mb-2 font-semibold">LLM endpoint</legend>
+          <legend data-i18n="settings.llm_endpoint" class="mb-2 font-semibold">LLM endpoint</legend>
           <label class="block">
-            <span class="font-mono text-xs uppercase tracking-wider text-zinc-400">Base URL</span>
+            <span data-i18n="settings.base_url" class="font-mono text-xs uppercase tracking-wider text-zinc-400">Base URL</span>
             <input
               name="base_url"
               type="url"
@@ -136,17 +146,18 @@
             />
           </label>
           <label class="mt-3 block">
-            <span class="font-mono text-xs uppercase tracking-wider text-zinc-400">API key</span>
+            <span data-i18n="settings.api_key" class="font-mono text-xs uppercase tracking-wider text-zinc-400">API key</span>
             <input
               name="api_key"
               type="password"
               autocomplete="off"
               class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
+              data-i18n-placeholder="settings.api_key_placeholder"
               placeholder="sk-…"
             />
           </label>
           <label class="mt-3 block">
-            <span class="font-mono text-xs uppercase tracking-wider text-zinc-400">Model</span>
+            <span data-i18n="settings.model" class="font-mono text-xs uppercase tracking-wider text-zinc-400">Model</span>
             <input
               name="model"
               type="text"
@@ -157,8 +168,8 @@
         </fieldset>
 
         <fieldset>
-          <legend class="mb-2 font-semibold">MCP endpoint</legend>
-          <p class="mb-2 text-xs text-zinc-400">
+          <legend data-i18n="settings.mcp_endpoint" class="mb-2 font-semibold">MCP endpoint</legend>
+          <p data-i18n="settings.mcp_blurb" class="mb-2 text-xs text-zinc-400">
             Point any MCP client (Claude Desktop, Cursor, Codex, Claude Code) at this URL.
             No per-host setup needed — as long as Cheat Engine is running, the URL is live.
           </p>
@@ -172,33 +183,35 @@
             <button
               type="button"
               id="mcp-url-copy"
+              data-i18n="settings.copy"
               class="rounded border border-zinc-700 px-3 text-xs hover:bg-zinc-800"
             >Copy</button>
           </div>
         </fieldset>
 
         <fieldset>
-          <legend class="mb-2 font-semibold">Cheat Engine UI</legend>
+          <legend data-i18n="settings.ce_ui" class="mb-2 font-semibold">Cheat Engine UI</legend>
           <label class="flex items-center gap-2">
             <input name="show_status_form" type="checkbox" class="h-4 w-4 accent-emerald-600" />
-            <span>Show CEGM status window on Cheat Engine startup</span>
+            <span data-i18n="settings.show_form">Show CEGM status window on Cheat Engine startup</span>
           </label>
-          <p class="mt-1 text-xs text-zinc-500">
+          <p data-i18n="settings.show_form_hint" class="mt-1 text-xs text-zinc-500">
             Off — broker still auto-spawns, just no popup. Open this dashboard via the
             "Open CEGM Dashboard" main-menu item from the C plugin.
           </p>
         </fieldset>
 
         <fieldset>
-          <legend class="mb-2 font-semibold">Safety</legend>
+          <legend data-i18n="settings.safety" class="mb-2 font-semibold">Safety</legend>
           <label class="flex items-center gap-2">
             <input name="preview_writes_default" type="checkbox" class="h-4 w-4 accent-emerald-600" />
-            <span>Preview every memory write before applying</span>
+            <span data-i18n="settings.preview_writes">Preview every memory write before applying</span>
           </label>
         </fieldset>
 
         <button
           type="submit"
+          data-i18n="settings.save"
           class="mt-auto rounded bg-emerald-600 px-4 py-2 text-sm font-semibold hover:bg-emerald-500"
         >Save</button>
       </form>

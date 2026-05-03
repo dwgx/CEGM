@@ -8,6 +8,7 @@
  * timestamp, a tag for the event kind, and a JSON-stringified payload.
  * Phase 2 layers diff highlighting and expandable details on top.
  */
+import {t} from "/js/i18n.js";
 
 const TIMELINE_ID = "timeline";
 const MAX_ROWS = 500;
@@ -26,6 +27,7 @@ const KIND_COLORS = {
   snapshot_restored:  "text-violet-300",
   broker_status:      "text-zinc-500",
   ce_status:          "text-zinc-500",
+  dashboard_chat_request: "text-fuchsia-400",
 };
 
 function timelineEl() {
@@ -33,7 +35,6 @@ function timelineEl() {
 }
 
 function formatTime(iso) {
-  // Show only HH:MM:SS.mmm — date is implicit per session.
   const m = iso.match(/T(\d\d:\d\d:\d\d\.\d{3})/);
   return m ? m[1] : iso;
 }
@@ -44,7 +45,8 @@ export function appendEventRow(evt) {
   if (!list) return;
 
   // First real event clears the placeholder row.
-  if (list.firstElementChild?.classList.contains("text-zinc-600")) {
+  const first = list.firstElementChild;
+  if (first?.dataset?.i18n === "activity.empty") {
     list.replaceChildren();
   }
 
@@ -83,6 +85,7 @@ export function clearTimeline() {
   list.replaceChildren();
   const placeholder = document.createElement("li");
   placeholder.className = "text-zinc-600";
-  placeholder.textContent = "— no activity yet —";
+  placeholder.dataset.i18n = "activity.empty";
+  placeholder.textContent = t("activity.empty");
   list.append(placeholder);
 }

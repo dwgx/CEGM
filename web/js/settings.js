@@ -4,6 +4,7 @@
  * so reloading the page doesn't lose unsaved typing.
  */
 import {fetchConfig, updateConfig} from "/js/api.js";
+import {t} from "/js/i18n.js";
 
 /**
  * @param {{toggleId: string, drawerId: string, formId: string}} ids
@@ -24,7 +25,7 @@ export function bindSettings(ids) {
       form.elements.namedItem("model").value = llm.model ?? "";
       form.elements.namedItem("api_key").value = "";
       form.elements.namedItem("api_key").placeholder =
-        llm.api_key === "***" ? "(unchanged)" : "sk-…";
+        llm.api_key === "***" ? t("settings.api_key_unchanged") : t("settings.api_key_placeholder");
 
       const ui = cfg?.ui ?? {};
       const showForm = form.elements.namedItem("show_status_form");
@@ -36,9 +37,6 @@ export function bindSettings(ids) {
       const cb = form.elements.namedItem("preview_writes_default");
       if (cb instanceof HTMLInputElement) cb.checked = Boolean(safety.preview_writes_default);
 
-      // The MCP URL is always derived from the page's own origin so it
-      // works behind reverse proxies / port overrides without needing a
-      // round-trip to /api/config.
       const mcpUrl = `${location.origin}/mcp`;
       const mcpInput = /** @type {HTMLInputElement | null} */ (
         document.getElementById("mcp-url")
@@ -64,8 +62,6 @@ export function bindSettings(ids) {
     if (e.key === "Escape" && !drawer.hidden) close();
   });
 
-  // MCP URL copy button — uses the modern Clipboard API; falls back to
-  // a select+execCommand path on older browsers / non-secure contexts.
   document.getElementById("mcp-url-copy")?.addEventListener("click", async () => {
     const input = /** @type {HTMLInputElement | null} */ (document.getElementById("mcp-url"));
     if (!input) return;
@@ -108,10 +104,10 @@ export function bindSettings(ids) {
   });
 }
 
-/** Briefly flash a "Copied" hint next to the field. */
+/** Briefly flash the i18n "Copied!" hint in the URL field. */
 function flashCopied(target) {
   const original = target.value;
-  target.value = "Copied!";
+  target.value = t("settings.copied");
   target.classList.add("text-emerald-400");
   setTimeout(() => {
     target.value = original;
