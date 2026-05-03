@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "Claude Desktop config for connecting to a running CEGM broker.",
+    "Drop this at %APPDATA%\\Claude\\claude_desktop_config.json (Windows) or",
+    "~/Library/Application Support/Claude/claude_desktop_config.json (macOS).",
+    "Restart Claude Desktop after saving.",
+    "",
+    "Two variants below — pick one and remove the other. The HTTP variant",
+    "is preferred because it does not require Claude Desktop to spawn the",
+    "broker; the broker is already running once Cheat Engine is open."
+  ],
+  "mcpServers": {
+    "cegm-http": {
+      "_comment": "Preferred. Requires Cheat Engine + CEGM plugin running so the broker is live on 127.0.0.1:27077.",
+      "url": "http://127.0.0.1:27077/mcp"
+    },
+    "cegm-stdio-fallback": {
+      "_comment": "Use only if HTTP is unavailable. Spawns its own broker (will not connect to a CE that is already running).",
+      "command": "uvx",
+      "args": ["cegm-broker", "--transport", "stdio"]
+    }
+  }
+}

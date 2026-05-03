@@ -1,0 +1,116 @@
+name: Release
+
+# Push a git tag like ``v0.1.0a1`` to build and publish ``cegm-broker`` to PyPI.
+# Manual runs are also allowed for dry-runs (uses TestPyPI when triggered manually).
+#
+# One-time setup on PyPI side:
+#   1. Create a PyPI account.
+#   2. https://pypi.org/manage/account/publishing/ → add a "pending" trusted
+#      publisher with: project name = cegm-broker, owner = dwgx,
+#      repo = CEGM, workflow = release.yml, environment = pypi.
+#   3. Push the first tag — this completes the trusted-publisher binding.
+#
+# After the first successful publish, subsequent tags publish automatically
+# via OIDC. No API tokens are stored.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+permissions:
+  contents: read
+  id-token: write  # OIDC for PyPI Trusted Publisher
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: broker
+    steps:
+      - name: Checkout (with submodules — needed for vendor/)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync deps
+        run: uv sync --all-extras
+
+      - name: Quality gate — ruff, mypy, pytest
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy
+          uv run pytest
+
+      - name: Build distributions
+        run: uv build --sdist --wheel --out-dir dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cegm-broker-distributions
+          path: broker/dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: github.event_name == 'push' || github.event.inputs.target == 'pypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cegm-broker
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cegm-broker-distributions
+          path: dist
+
+      - name: Publish via PyPI Trusted Publisher (OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/cegm-broker
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: cegm-broker-distributions
+          path: dist
+
+      - name: Publish via TestPyPI Trusted Publisher (OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/

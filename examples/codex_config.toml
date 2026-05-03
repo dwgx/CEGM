@@ -1,0 +1,7 @@
+# OpenAI Codex CLI config snippet for CEGM.
+# Append to ~/.codex/config.toml (or %USERPROFILE%\.codex\config.toml on Windows).
+# Restart codex after saving.
+
+[mcp_servers.cegm]
+type = "http"
+url = "http://127.0.0.1:27077/mcp"

@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Cursor MCP config. Drop at one of:",
+    "  Global: %USERPROFILE%\\.cursor\\mcp.json (Windows)",
+    "          ~/.cursor/mcp.json (macOS / Linux)",
+    "  Per-project: <project>/.cursor/mcp.json",
+    "",
+    "Restart Cursor after saving."
+  ],
+  "mcpServers": {
+    "cegm": {
+      "url": "http://127.0.0.1:27077/mcp"
+    }
+  }
+}

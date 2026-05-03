@@ -1,0 +1,17 @@
+# Register CEGM with Claude Code
+
+# Project-scoped (writes ./.mcp.json — share with team via git):
+claude mcp add --transport http cegm http://127.0.0.1:27077/mcp
+
+# Local-scoped (writes ~/.claude.json — only for you, all projects):
+claude mcp add --scope local --transport http cegm http://127.0.0.1:27077/mcp
+
+# Verify:
+claude mcp list
+
+# Use within a Claude Code session:
+#   /mcp               # status of all servers
+#   /mcp__cegm__*      # the cegm tools the model can call
+
+# Remove:
+#   claude mcp remove cegm

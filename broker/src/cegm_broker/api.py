@@ -4,17 +4,20 @@
   and by the dashboard at load.
 - ``GET  /api/config`` — sanitized config snapshot (no secrets).
 - ``PUT  /api/config`` — merge-patch the runtime config; persists to disk.
-- ``POST /api/chat``   — dashboard chat. Phase 1 returns a single JSON body
-  (non-streaming); SSE streaming lands in a Phase 1 follow-up.
+- ``POST /api/chat``   — dashboard chat. Streams Server-Sent Events; the
+  client incrementally renders ``token`` payloads while ``tool_call`` /
+  ``tool_result`` show up on the activity timeline via the WebSocket.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from pydantic import ValidationError
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from cegm_broker import __version__
 from cegm_broker._logging import get_logger
@@ -89,11 +92,16 @@ async def config_put(request: Request) -> JSONResponse:
     return JSONResponse(new_config.sanitized())
 
 
-async def chat(request: Request) -> JSONResponse:
-    """Single-shot chat completion with full tool-call routing.
+async def chat(request: Request) -> StreamingResponse | JSONResponse:
+    """Streaming chat completion with full tool-call routing.
 
-    Body schema: ``{"messages": [{"role": "user|system|...", "content": "..."}]}``.
-    Returns the final assistant message after any tool round-trips.
+    Body: ``{"messages": [{"role": "user|system|...", "content": "..."}]}``.
+    Returns ``text/event-stream`` (Server-Sent Events). Each SSE frame
+    carries one JSON-encoded ``StreamEvent`` from
+    :meth:`cegm_broker.llm.LLMClient.astream_chat`. The terminal frame is
+    ``data: [DONE]\\n\\n``.
+
+    Validation failures are returned as a single JSON response (no stream).
     """
     body = await request.json()
     if not isinstance(body, dict):
@@ -137,9 +145,34 @@ async def chat(request: Request) -> JSONResponse:
             await bus.publish(Event.make("chat_user", {"content": last.get("content")}))
 
     llm = LLMClient(config.llm)
-    final = await llm.chat(list(messages_raw), tools, dispatcher)
-    await bus.publish(Event.make("chat_assistant", {"content": final.get("content")}))
-    return JSONResponse(final)
+    messages_for_llm: list[dict[str, Any]] = list(messages_raw)
+
+    async def event_source() -> AsyncIterator[bytes]:
+        full_text = ""
+        try:
+            async for evt in llm.astream_chat(messages_for_llm, tools, dispatcher):
+                if evt.get("type") == "token":
+                    full_text += evt.get("text", "")
+                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n".encode()
+        except Exception as exc:  # surface as one terminal SSE error event
+            err_evt = {"type": "error", "error": repr(exc)}
+            _log.warning("api.chat_stream_error", extra={"err": repr(exc)})
+            yield f"data: {json.dumps(err_evt)}\n\n".encode()
+        else:
+            await bus.publish(Event.make("chat_assistant", {"content": full_text}))
+        finally:
+            yield b"data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={
+            # Disable proxy buffering so tokens flush immediately.
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> None:

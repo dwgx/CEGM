@@ -2,15 +2,43 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+import json
+from collections.abc import AsyncIterator, Callable, Generator
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from starlette.testclient import TestClient
 
 from cegm_broker.server import build_app
+
+
+def _stream_factory(
+    events: list[dict[str, Any]],
+) -> Callable[..., AsyncIterator[dict[str, Any]]]:
+    """Build an ``astream_chat`` replacement that yields ``events`` then [DONE]."""
+
+    async def _stream(*_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+        for evt in events:
+            yield evt
+
+    return _stream
+
+
+def _parse_sse(body: str) -> list[dict[str, Any] | str]:
+    """Decode an SSE response body into a list of events (or the [DONE] sentinel)."""
+    out: list[dict[str, Any] | str] = []
+    for frame in body.split("\n\n"):
+        for line in frame.splitlines():
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:]
+            if payload == "[DONE]":
+                out.append("[DONE]")
+            else:
+                out.append(json.loads(payload))
+    return out
 
 
 @pytest.fixture
@@ -85,21 +113,29 @@ def test_chat_without_api_key_returns_400(client: TestClient) -> None:
     assert "api_key" in r.json()["error"]
 
 
-def test_chat_with_mocked_llm_round_trips(client: TestClient) -> None:
-    """End-to-end chat with a fake LLM: user → assistant text returned."""
+def test_chat_streams_sse_events(client: TestClient) -> None:
+    """End-to-end chat: stream tokens land as SSE frames terminated by [DONE]."""
     client.put("/api/config", json={"llm": {"api_key": "sk-test"}})
 
-    fake_response: dict[str, Any] = {"role": "assistant", "content": "hello back"}
-
+    events = [
+        {"type": "token", "text": "hello"},
+        {"type": "token", "text": " back"},
+        {"type": "done", "content": "hello back"},
+    ]
     with patch("cegm_broker.api.LLMClient") as mock_llm:
         instance = mock_llm.return_value
-        instance.chat = AsyncMock(return_value=fake_response)
+        instance.astream_chat = _stream_factory(events)
 
         r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}]})
         assert r.status_code == 200
-        assert r.json() == fake_response
-        # Sanity: the LLM was actually called once.
-        instance.chat.assert_awaited_once()
+        assert r.headers["content-type"].startswith("text/event-stream")
+
+        decoded = _parse_sse(r.text)
+        assert decoded[-1] == "[DONE]"
+        token_texts = [
+            e["text"] for e in decoded if isinstance(e, dict) and e.get("type") == "token"
+        ]
+        assert token_texts == ["hello", " back"]
 
 
 def test_invalid_chat_body_returns_400(client: TestClient) -> None:
@@ -117,18 +153,21 @@ def test_invalid_config_body_returns_400(client: TestClient) -> None:
 
 def test_websocket_replays_recent_events(client: TestClient) -> None:
     """Connecting to /events should immediately replay any history present."""
-    # Trigger a chat-user event to populate history.
     client.put("/api/config", json={"llm": {"api_key": "sk-test"}})
     with patch("cegm_broker.api.LLMClient") as mock_llm:
         instance = mock_llm.return_value
-        instance.chat = AsyncMock(return_value={"role": "assistant", "content": "ok"})
+        instance.astream_chat = _stream_factory(
+            [
+                {"type": "token", "text": "ok"},
+                {"type": "done", "content": "ok"},
+            ]
+        )
         client.post(
             "/api/chat",
             json={"messages": [{"role": "user", "content": "ping"}]},
         )
 
     with client.websocket_connect("/events") as ws:
-        # Expect at least one historical event on connect.
         first = ws.receive_json()
         assert "kind" in first
         assert first["ts"].endswith("Z")
