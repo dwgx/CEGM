@@ -15,7 +15,7 @@ local M = {}
 
 ---Defaults that match cegm_broker.config defaults. Keep in sync.
 local DEFAULTS = {
-  ui = { show_status_form = true },
+  ui = { show_status_form = false },
   server = { host = "127.0.0.1", port = 27077 },
 }
 

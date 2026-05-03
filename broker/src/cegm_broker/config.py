@@ -64,10 +64,12 @@ class UIConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    show_status_form: bool = True
-    """If False, the floating "CEGM 0.1.0a1" status form is suppressed
-    on CE startup. The user can still open the dashboard via the C
-    plugin's main-menu entry or by visiting the URL directly."""
+    show_status_form: bool = False
+    """If True, a small floating "CEGM 0.1.0a1" status form opens on CE
+    startup with the broker URL and an "Open Dashboard" button. Off by
+    default — the C plugin's main-menu entry "Open CEGM Dashboard" plus
+    the broker auto-spawn give the same UX without a stray window. Flip
+    on in the dashboard's Settings drawer if you prefer the popup."""
 
 
 class ServerConfig(BaseModel):
