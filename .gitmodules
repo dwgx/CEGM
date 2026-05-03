@@ -1,0 +1,3 @@
+[submodule "vendor/cheatengine-mcp-bridge"]
+	path = vendor/cheatengine-mcp-bridge
+	url = https://github.com/miscusi-peek/cheatengine-mcp-bridge.git

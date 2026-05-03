@@ -1,69 +1,94 @@
 # CheatEngineGM (CEGM)
 
-> An LLM-driven Cheat Engine plugin. Talk to Cheat Engine in plain language; the model drives the scanner, reads memory, follows pointer chains, and modifies values — you watch it work.
+> A live, observable LLM-driven layer over Cheat Engine. Open CE → port `27077` is up → talk to the model from a browser tab or any MCP client (Claude Desktop, Cursor, Claude Code, Codex) → watch tool calls and memory diffs land in real time. Single-player offline use only.
 
-**Status:** alpha / WIP — no working release yet. See [docs/ROADMAP.md](docs/ROADMAP.md) for the phase plan.
+**Status:** alpha / WIP — Phase 1 (closed-loop MVP) in progress. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it is
 
-CEGM is a Lua plugin for [Cheat Engine](https://github.com/cheat-engine/cheat-engine) plus a small local Python broker that exposes Cheat Engine's scanner as an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) server. The LLM — your Claude / Cursor / Claude Desktop / any OpenAI-compatible model — sees Cheat Engine's tools and can drive them on your behalf.
+CEGM is a thin **experience layer** built on top of the excellent [miscusi-peek/cheatengine-mcp-bridge](https://github.com/miscusi-peek/cheatengine-mcp-bridge) (MIT, vendored as a git submodule). When Cheat Engine starts, our Lua autorun spawns a small Python broker that:
 
-You stay in the loop: every tool call the model makes is rendered as a live activity feed inside Cheat Engine. Nothing is hidden. You can pause, override, or take the wheel at any time.
+- Exposes an **MCP Streamable HTTP** endpoint at `http://127.0.0.1:27077/mcp` so any MCP client (Claude Desktop, Cursor, Claude Code, Codex, …) gets the full tool list with **zero per-host configuration** — as long as CE is running, the URL is live.
+- Serves a **built-in browser dashboard** at `http://127.0.0.1:27077/` with chat input, a live tool-call timeline, before/after diffs on memory writes, and a settings drawer for your LLM key.
+- Adds a small set of **CEGM-namespaced tools** layered on top: preview-before-commit for writes, named snapshots, restore points, and (Phase 3) a recipe library of common workflows.
+
+The differentiating bet: **observability and safety**. Every surveyed competitor pipes tool calls headlessly to whatever client the user has open. CEGM shows them, lets you preview destructive ones, and lets you roll back.
 
 ## Why
 
-Manually finding base addresses, offsets, and pointer chains for single-player game memory is repetitive and error-prone. CEGM offloads the grind to a model while keeping you in control.
+Manually finding base addresses, offsets, and pointer chains for single-player game memory is repetitive. CEGM offloads the grind to a model while keeping every step visible and reversible.
 
 **Scope:** single-player offline games only. CEGM is not for online or multiplayer titles, and is not designed to evade anti-cheat.
 
 ## How it works
 
 ```
-+------------------+     JSON-RPC over     +-------------------+      MCP / OpenAI tools     +-----------+
-|  Cheat Engine    | <===================> |  CEGM broker      | <=========================> |  LLM      |
-|  + Lua plugin    |   localhost socket    |  (Python)         |     Streamable HTTP         |  client   |
-|  + Activity feed |                       |  - MCP server     |                             |           |
-+------------------+                       |  - LLM client     |                             +-----------+
-                                           |  - JSONL log tap  |
-                                           +-------------------+
+                    ┌─ External MCP clients ─────────────┐
+                    │  Claude Desktop / Cursor / Codex   │
+                    └──────────────┬─────────────────────┘
+                                   │ HTTP MCP
+                                   ▼                                ┌────────────────────┐
+                    ┌──────────────────────────────────────┐        │  Browser           │
+                    │  cegm-broker  (Python, autospawned)  │ ◀──── │  http://127.0.0.1: │
+                    │  127.0.0.1:27077                     │  WS    │  27077/            │
+                    │  /mcp · /events · /api/* · /         │        └────────────────────┘
+                    └──────────────┬───────────────────────┘
+                                   │ stdio MCP
+                                   ▼
+                    ┌──────────────────────────────────────┐
+                    │  miscusi-peek/cheatengine-mcp-bridge │
+                    │  (vendored, MIT, ~180 tools)         │
+                    └──────────────┬───────────────────────┘
+                                   │ named pipe
+                                   ▼
+                    ┌──────────────────────────────────────┐
+                    │  Cheat Engine 7.5+                   │
+                    └──────────────────────────────────────┘
 ```
 
-Two integration paths, same broker:
+Two integration paths, one endpoint:
 
-1. **External MCP client** — point Claude Desktop / Cursor / Claude Code at the broker's `http://127.0.0.1:<port>/mcp` endpoint. Use the model's native chat UI; CE shows what's happening.
-2. **In-CE chat panel** — built-in chat UI inside Cheat Engine's plugin window, talking to a user-configured OpenAI-compatible endpoint (DeepSeek, OpenAI, local Ollama, anything).
-
-Both paths land in the same broker, which exposes the same tool surface and writes the same audit log.
+1. **External MCP client** — point your model client at `http://127.0.0.1:27077/mcp`. Sample configs for Claude Desktop, Cursor, Claude Code in [`examples/`](examples/).
+2. **Built-in browser dashboard** — open `http://127.0.0.1:27077/` in any browser. The dashboard talks to its own LLM client (default DeepSeek; pluggable to any OpenAI-compatible endpoint). The same activity timeline shows up regardless of which path drove the tools.
 
 ## Repository layout
 
 ```
-plugin/         Lua plugin loaded by Cheat Engine (CE Autorun bundle)
-broker/         Python broker — MCP server + LLM client + CE bridge
-docs/           Architecture, roadmap, tool spec, ADRs
-scripts/        Install / dev helpers
-examples/       Client config snippets (Claude Desktop, Cursor, Claude Code)
+plugin/         CE Lua autorun bundle (our shim + vendored ce_mcp_bridge.lua)
+broker/         Python broker — MCP server + LLM client + dashboard backend
+web/            Static dashboard (HTML / Tailwind / vanilla JS)
+vendor/
+  cheatengine-mcp-bridge/   git submodule, miscusi-peek (MIT)
+docs/
+  ARCHITECTURE.md  ROADMAP.md  TOOL_SPEC.md
+  decisions/       ADRs 0001-0004
+  research/        external research snapshots
+scripts/        installer + dev helpers (Phase 5)
+examples/       MCP client config snippets
 ```
 
 ## Install
 
-Not yet available — see [docs/ROADMAP.md](docs/ROADMAP.md). Phase 1 will ship a one-shot installer that copies the plugin to CE's autorun folder and registers the broker as a `uv tool`.
+Not yet released. Phase 1 lands the first usable build. Tracked at [#1](https://github.com/dwgx/CEGM/issues) (TBD). For developers cloning today:
 
-## Build / run from source (developer preview)
-
-Coming once Phase 1 lands. For now the repo is documentation + skeleton only.
+```bash
+git clone --recurse-submodules https://github.com/dwgx/CEGM.git
+cd CEGM/broker
+uv sync
+# scaffolding only at this point — no runnable broker yet
+```
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — components, dataflow, transport choices
+- [Architecture](docs/ARCHITECTURE.md) — components, dataflow, lifecycle
 - [Roadmap](docs/ROADMAP.md) — phased delivery plan
-- [Tool spec](docs/TOOL_SPEC.md) — what the LLM can call
-- [Decisions](docs/decisions/) — architecture decision records (ADRs)
+- [Tool spec](docs/TOOL_SPEC.md) — CEGM extras + proxied tool reference
+- [Decisions](docs/decisions/) — ADRs, including [0004](docs/decisions/0004-build-on-miscusi-peek.md) (the headline pivot)
 
-## Contributing
+## Acknowledgments
 
-Project is at the skeleton-and-design stage. If you want to help shape it, open an issue describing what you'd build. Code contributions welcome once Phase 1 lands a working scaffold.
+CEGM stands on the shoulders of [miscusi-peek/cheatengine-mcp-bridge](https://github.com/miscusi-peek/cheatengine-mcp-bridge), which provides the entire MCP-to-CE tool surface. We vendor their work under `vendor/cheatengine-mcp-bridge/` with their MIT license preserved. If you find CEGM useful, consider starring or sponsoring miscusi-peek's project as well.
 
 ## License
 
-CEGM is licensed under [GPL-2.0-only](LICENSE), matching the license of upstream Cheat Engine. CEGM is not affiliated with or endorsed by the Cheat Engine project.
+CEGM is licensed under [GPL-2.0-only](LICENSE), matching upstream Cheat Engine. Vendored components retain their original licenses (see `vendor/*/LICENSE`). CEGM is not affiliated with or endorsed by the Cheat Engine project or miscusi-peek.

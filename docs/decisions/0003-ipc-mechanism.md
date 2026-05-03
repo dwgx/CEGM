@@ -1,8 +1,14 @@
 # ADR-0003: File-based IPC between CE plugin and broker for MVP
 
-- **Status:** accepted
-- **Date:** 2026-05-03
+- **Status:** **superseded by [ADR-0004](0004-build-on-miscusi-peek.md)** (2026-05-03)
+- **Date:** 2026-05-03 (accepted) → 2026-05-03 (superseded)
 - **Deciders:** dwgx (project owner)
+
+> **Superseded note (2026-05-03):** Late on 2026-05-03 we discovered miscusi-peek/cheatengine-mcp-bridge already provides a working CE↔Python IPC via named pipes (`\\.\pipe\CE_MCP_Bridge_v99`). ADR-0004 pivots CEGM to vendor that project as our backend, which makes the file-IPC design here unnecessary. The original analysis below is preserved as a historical record of why building our own IPC was attractive when we believed we'd implement the full backend ourselves.
+
+---
+
+## Original ADR (now historical)
 
 ## Context
 

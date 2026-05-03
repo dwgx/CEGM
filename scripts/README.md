@@ -4,9 +4,10 @@ Developer and end-user helper scripts.
 
 ## Planned
 
-- `install.ps1` — Windows one-shot installer (Phase 5). Detects CE, copies the Lua plugin into `<CE>/autorun/CEGM/`, installs the broker via `uv tool install cegm-broker`, drops sample MCP client configs into `examples/`.
+- `install.ps1` — Windows one-shot installer (Phase 5). Detects CE, copies `plugin\*.lua` and `vendor\cheatengine-mcp-bridge\MCP_Server\ce_mcp_bridge.lua` into `<CE>\autorun\CEGM\`, installs the broker via `uv tool install cegm-broker`, drops a desktop shortcut to the dashboard.
 - `uninstall.ps1` — reverses `install.ps1`.
-- `dev-bootstrap.sh` / `dev-bootstrap.ps1` — sets up the developer environment (creates `broker/.venv`, installs `[dev]` extras, links the plugin into a CE install for live editing).
+- `dev-bootstrap.ps1` — sets up the developer environment: `uv sync` in `broker/`, symlinks plugin into a CE install for live editing, starts a watcher.
+- `bump-vendor.ps1` — pulls the latest miscusi-peek commit, smoke-tests `tools/list`, updates the pinned reference in ADR-0004.
 
 ## Status
 
