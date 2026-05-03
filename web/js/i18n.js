@@ -50,7 +50,7 @@ const STRINGS = {
     "settings.ce_ui": "Cheat Engine UI",
     "settings.show_form": "Show CEGM status window on Cheat Engine startup",
     "settings.show_form_hint":
-      "Off — broker still auto-spawns, just no popup. Open this dashboard via the \"Open CEGM Dashboard\" main-menu item from the C plugin.",
+      "Off by default. The broker is started either by the C plugin (Open CEGM Dashboard menu, silent) or by you running ``cegm-broker --port 27077`` manually. The Lua autorun does not spawn the broker.",
     "settings.safety": "Safety",
     "settings.preview_writes": "Preview every memory write before applying",
 
@@ -96,7 +96,7 @@ const STRINGS = {
     "settings.ce_ui": "Cheat Engine 界面",
     "settings.show_form": "启动 Cheat Engine 时显示 CEGM 状态窗口",
     "settings.show_form_hint":
-      "关闭后 broker 仍自动启动，只是不弹窗。可从 C 插件主菜单的「Open CEGM Dashboard」打开此面板。",
+      "默认关闭。Broker 由 C 插件菜单「Open CEGM Dashboard」（静默拉起）或者你自己运行 ``cegm-broker --port 27077`` 启动。Lua autorun 不会自动起 broker。",
     "settings.safety": "安全",
     "settings.preview_writes": "每次内存写入前先预览",
 

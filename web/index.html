@@ -196,8 +196,10 @@
             <span data-i18n="settings.show_form">Show CEGM status window on Cheat Engine startup</span>
           </label>
           <p data-i18n="settings.show_form_hint" class="mt-1 text-xs text-zinc-500">
-            Off — broker still auto-spawns, just no popup. Open this dashboard via the
-            "Open CEGM Dashboard" main-menu item from the C plugin.
+            Off by default. The broker is started either by the C plugin
+            (Open CEGM Dashboard menu, silent) or by you running
+            ``cegm-broker --port 27077`` manually. The Lua autorun does
+            not spawn the broker.
           </p>
         </fieldset>
 

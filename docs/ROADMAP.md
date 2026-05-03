@@ -31,39 +31,37 @@ Phases are sequential. Each phase has a binary "done" criterion. No phase ships 
 - Test coverage: `pytest` ≥ 60% on broker, smoke test that exercises spawn → handshake → list_tools → memory_read against a stub CE
 - Demo script in README: open notepad.exe, ask "what's the value at 0x... right now?", watch the read happen in the timeline
 
-## Phase 2 — Differentiation: preview writes + diff visualization
+## Phase 2 — RE workbench: scan / watch / hex / tool browser
 
-**Goal:** every memory write the LLM proposes can be inspected before it lands; every applied write shows a before/after diff in the activity feed. This is the headline feature versus all surveyed competitors.
+**Goal:** turn the dashboard from "JSON-blob log" into a workbench that mirrors the operations a real reverse engineer performs. See [RE_WORKBENCH_PLAN.md](RE_WORKBENCH_PLAN.md) for the friction log and feature spec.
+
+**Done when:**
+
+- `cegm.scan` / `cegm.scan_narrow` / `cegm.scan_drop` — one-shot scan with inline first page; right-rail "Scans" tab renders results, supports per-row narrow / watch / write actions
+- `cegm.watch_add` / `watch_remove` / `watch_list` + asyncio polling task — `watch_update` events on the WebSocket; "Watches" tab renders a live-updating grid
+- `cegm.hex_dump` — inline hex+ASCII viewer, opens from any row that has an address
+- Tool browser tab — categorized search over the 175 upstream tools (`process` / `memory` / `scan` / `pointer` / `disasm` / `breakpoint` / `inject` / `cheat_table` / `cegm`), populated by `_meta.category` tags the proxy adds at registration time
+
+## Phase 3 — Disassembly + recipes
+
+- `cegm.disasm_at` returning structured rows; syntax-highlighted disasm pane
+- Pointer-chain visualizer (boxes per level, live values)
+- `cegm.recipe_list` / `recipe_run` + built-in recipes: `find_numeric_stat`, `follow_pointer_chain`, `find_what_writes`, `code_cave_inject`, `aob_signature_lock`
+- MCP `Prompt` definitions matching each recipe
+
+## Phase 4 — Diff + preview-write + snapshots
+
+(Was Phase 2 in the original plan; demoted because the items above turn out to give a much bigger UX lift first.)
+
+**Goal:** every memory write the LLM proposes can be inspected before it lands; every applied write shows a before/after diff in the activity feed.
 
 **Done when:**
 
 - `cegm.preview_write(address, vt, value)` returns a preview ticket; `cegm.commit_pending(ticket)` applies; `cegm.cancel_pending(ticket)` discards. Pending tickets emit `preview_pending` events the dashboard renders as yellow rows with confirm/discard buttons.
 - Settings flag `safety.preview_writes_default` (off by default) routes all proxied `memory_write` calls through the preview pipeline transparently.
 - Activity feed renders memory writes with `address | type | before → after`. Bytes-typed writes show a hex-diff. Numeric writes show the delta.
-- Confirmed preview event broadcasts; multi-tab dashboards stay in sync.
-- Smoke test of the round-trip: dashboard issues a preview, second tab sees the pending row, first tab confirms, second tab sees commit.
-
-## Phase 3 — Differentiation: snapshots + recipes
-
-**Goal:** the user can take a labeled snapshot of all watched addresses, perform a destructive experiment, and roll back with one click. Common workflows ship as parameterized prompts ("recipes") the LLM can run.
-
-**Done when:**
-
-- `cegm.snapshot_take(label?)` / `cegm.snapshot_restore(id)` / `cegm.snapshot_list()` work end-to-end; storage under `%LOCALAPPDATA%\CEGM\snapshots\<session>\<id>.json`
-- Dashboard sidebar shows snapshot list with restore and delete actions
-- Recipe library: `cegm.recipe_list()` returns built-in recipes; `cegm.recipe_run(name, args)` executes a guided multi-tool sequence. Initial set: `find-numeric-stat`, `follow-pointer-chain`, `dissect-struct-at`. Recipes are MCP `Prompt` definitions internally.
-- One-page docs site explaining the safety model
-
-## Phase 4 — Bilingual UX (中英)
-
-**Goal:** dashboard, settings, error messages, and primary docs ship in both Chinese and English. Toggle in settings; default by browser locale.
-
-**Done when:**
-
-- All dashboard strings localized via a single `i18n.json` keyed lookup
-- README, ARCHITECTURE, ROADMAP have Chinese versions: `README.zh-CN.md`, `docs/ARCHITECTURE.zh-CN.md`, `docs/ROADMAP.zh-CN.md`
-- LLM system prompt selects per-locale tone defaults
-- Recipe descriptions and error messages translated
+- `cegm.snapshot_take(label?)` / `cegm.snapshot_restore(id)` / `cegm.snapshot_list()` work end-to-end.
+- Dashboard sidebar shows snapshot list with restore actions.
 
 ## Phase 5 — Distribution polish
 
