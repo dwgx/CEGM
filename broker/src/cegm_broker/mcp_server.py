@@ -45,22 +45,32 @@ def build_server(proxy: MCPProxy, bus: EventBus) -> Server:
         return [*proxy.tools, *EXTRAS_TOOL_DEFS]
 
     @server.call_tool()  # type: ignore[untyped-decorator]
-    async def _call_tool(name: str, arguments: dict[str, object]) -> Sequence[types.ContentBlock]:
+    async def _call_tool(
+        name: str, arguments: dict[str, object]
+    ) -> Sequence[types.ContentBlock] | types.CallToolResult:
+        """Dispatch a single ``tools/call`` to either a CEGM extra or upstream.
+
+        Upstream tools return :class:`~mcp.types.CallToolResult` so the SDK
+        sees both ``content`` and ``structuredContent`` (required when the
+        upstream tool declares an ``outputSchema``). CEGM extras return
+        plain content blocks since they don't declare structured outputs.
+        """
         await bus.publish(Event.make("tool_called", {"name": name, "arguments": arguments}))
         try:
             if is_extra(name):
-                content = await dispatch_extra(name, arguments, bus)
+                result: Sequence[types.ContentBlock] | types.CallToolResult = await dispatch_extra(
+                    name, arguments, bus
+                )
             else:
                 if not proxy.available:
                     raise RuntimeError(f"upstream MCP not connected; cannot dispatch {name!r}")
-                upstream = await proxy.call_tool(name, dict(arguments))
-                content = upstream.content
+                result = await proxy.call_tool(name, dict(arguments))
         except Exception as exc:
             await bus.publish(
                 Event.make("tool_error", {"name": name, "error": repr(exc)}),
             )
             raise
         await bus.publish(Event.make("tool_result", {"name": name, "ok": True}))
-        return content
+        return result
 
     return server

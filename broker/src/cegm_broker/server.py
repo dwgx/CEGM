@@ -110,24 +110,32 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]
     return lifespan
 
 
-async def _mcp_asgi(scope: Scope, receive: Receive, send: Send) -> None:
-    """Deferred ASGI delegate for ``/mcp`` — looks up the session manager at request time.
+class _MCPRouteApp:
+    """ASGI app wrapper for ``/mcp`` — looks up the session manager at request time.
 
-    Mount needs an ASGI app at construction; ``session_mgr`` is only built
-    inside the lifespan. This shim defers the lookup so initialization
-    order is independent of route registration.
+    Starlette's :class:`~starlette.routing.Route` distinguishes "endpoint
+    function takes a ``Request``" from "endpoint is an ASGI app" by class
+    shape. A plain ``async def`` is treated as the former and rejected for
+    non-GET/HEAD; a class with ``__call__(scope, receive, send)`` is
+    treated correctly as ASGI. This wrapper is the same shape FastMCP's
+    own ``StreamableHTTPASGIApp`` uses.
+
+    The session manager is built inside the lifespan, so we resolve it
+    from ``scope["app"].state`` per-request rather than at construction.
     """
-    app = scope.get("app")
-    session_mgr = getattr(getattr(app, "state", None), "mcp_session_mgr", None)
-    if session_mgr is None:
-        # 503 — server is still starting (rare but possible if a client
-        # hits us during the brief window before lifespan completes).
-        if scope["type"] != "http":
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        app = scope.get("app")
+        session_mgr = getattr(getattr(app, "state", None), "mcp_session_mgr", None)
+        if session_mgr is None:
+            if scope["type"] != "http":
+                return
+            await send({"type": "http.response.start", "status": 503, "headers": []})
+            await send(
+                {"type": "http.response.body", "body": b"MCP session manager not ready"}
+            )
             return
-        await send({"type": "http.response.start", "status": 503, "headers": []})
-        await send({"type": "http.response.body", "body": b"MCP session manager not ready"})
-        return
-    await session_mgr.handle_request(scope, receive, send)
+        await session_mgr.handle_request(scope, receive, send)
 
 
 def build_app(parent_pid: int | None = None) -> ASGIApp:
@@ -138,7 +146,10 @@ def build_app(parent_pid: int | None = None) -> ASGIApp:
         Route("/api/config", config_put, methods=["PUT"]),
         Route("/api/chat", chat, methods=["POST"]),
         WebSocketRoute("/events", events_endpoint),
-        Mount("/mcp", app=_mcp_asgi),
+        # Use Route(endpoint=<asgi-app>) — same pattern FastMCP uses internally —
+        # so all HTTP methods reach the session manager. Mount("/mcp") would
+        # strip the path and Starlette would 405 on POST.
+        Route("/mcp", endpoint=_MCPRouteApp()),
     ]
 
     if _WEB_DIR.is_dir():

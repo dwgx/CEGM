@@ -11,15 +11,23 @@ See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) for the full picture and [do
 
 ```
 plugin/
-├── cegm.lua                 # autorun entry — spawns broker, opens status form
+├── cegm_loader.lua          # top-level autorun bootstrapper (drops in <CE>/autorun/)
+├── cegm.lua                 # our shim — spawns broker, opens status form
 ├── lib/
-│   ├── bridge_spawn.lua     # detached child-process launch via os.execute
+│   ├── spawn.lua            # detached child-process launch via os.execute
 │   ├── ui.lua               # floating status form (port, broker pid, "Open Dashboard")
 │   ├── port_probe.lua       # checks if 127.0.0.1:27077 is bound (avoids double-spawn)
+│   ├── paths.lua            # %LOCALAPPDATA%\CEGM\... helpers
 │   ├── log.lua              # appends to %LOCALAPPDATA%\CEGM\logs\plugin.log
 │   └── dkjson.lua           # pure-Lua JSON, MIT (vendored)
 └── README.md                # this file
 ```
+
+**Why a loader?** Cheat Engine's autorun mechanism executes top-level
+``*.lua`` files only — it does not recurse into subdirectories. The
+14-line ``cegm_loader.lua`` lives at ``<CE>/autorun/`` and ``dofile()``s
+the real scripts from ``<CE>/autorun/CEGM/``. This keeps the autorun
+folder uncluttered and our files grouped.
 
 ## Threading
 
@@ -34,9 +42,9 @@ CE Lua is single-threaded on the main UI thread. **Never** block here. miscusi-p
 
 1. Locate the Cheat Engine install directory (typically `C:\Program Files\Cheat Engine 7.5\`).
 2. Create `<CE>\autorun\CEGM\`.
-3. Copy `plugin\cegm.lua` and `plugin\lib\` into it.
-4. Copy `vendor\cheatengine-mcp-bridge\MCP_Server\ce_mcp_bridge.lua` into the same `<CE>\autorun\CEGM\` directory.
-5. Install the broker: `uv tool install cegm-broker` (Phase 1 publishes to PyPI).
+3. Copy `plugin\cegm.lua`, `plugin\lib\`, and `vendor\cheatengine-mcp-bridge\MCP_Server\ce_mcp_bridge.lua` into `<CE>\autorun\CEGM\`.
+4. Copy `plugin\cegm_loader.lua` into `<CE>\autorun\` (one level up — must be top-level for autorun to pick it up).
+5. Install the broker: `uv tool install cegm-broker` (once published to PyPI).
 6. Launch CE. The CEGM status form should appear and show "broker running on port 27077".
 
 ## 32-bit vs 64-bit
