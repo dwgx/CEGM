@@ -69,3 +69,7 @@ target/
 *.pdb
 *.ilk
 plugin/native/dist/
+
+# Local test targets (AssaultCube etc. — large game binaries)
+testbed/
+

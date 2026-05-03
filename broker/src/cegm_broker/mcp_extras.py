@@ -536,8 +536,12 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
         upstream = await _upstream_call(
             proxy, "read_memory", {"address": address, "length": length}
         )
-        hex_str = str(upstream.get("hex", upstream.get("bytes", upstream.get("result", ""))))
-        # Normalise to a flat hex string of even length
+        # Upstream's payload field varies by tool version: ``data`` (hex
+        # string with spaces) is what we see in v12; ``hex`` / ``bytes``
+        # / ``result`` are fallbacks for older builds.
+        hex_str = upstream.get("data") or upstream.get("hex") or upstream.get("result", "")
+        if not isinstance(hex_str, str):
+            hex_str = ""
         cleaned = hex_str.replace(" ", "").replace("\n", "").lower()
         rows: list[dict[str, Any]] = []
         for offset in range(0, len(cleaned), _HEX_CHARS_PER_ROW):
