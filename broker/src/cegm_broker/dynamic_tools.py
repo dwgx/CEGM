@@ -19,6 +19,7 @@ schema; the actual execution path is the proxied ``evaluate_lua`` tool
 from __future__ import annotations
 
 import json
+import re
 import threading
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
@@ -34,6 +35,10 @@ from cegm_broker._paths import data_root, ensure_dir
 _log = get_logger(__name__)
 
 _NAMESPACE_PREFIX = "custom."
+# ``custom.`` followed by an identifier-like char and identifier-friendly
+# rest. Mirrors the inputSchema pattern in mcp_extras.py so the schema
+# advertised to the LLM matches what the registry actually enforces.
+_NAME_PATTERN = re.compile(r"^custom\.[A-Za-z_][A-Za-z0-9_.-]*$")
 
 
 @dataclass(slots=True)
@@ -130,8 +135,11 @@ class DynamicToolRegistry:
         ``custom.`` (so dynamic tools can never accidentally shadow an
         upstream or built-in CEGM tool).
         """
-        if not isinstance(name, str) or not name.startswith(_NAMESPACE_PREFIX):
-            raise ValueError(f"name must start with {_NAMESPACE_PREFIX!r}; got {name!r}")
+        if not isinstance(name, str) or not _NAME_PATTERN.match(name):
+            raise ValueError(
+                f"name must match {_NAME_PATTERN.pattern!r} (custom.<identifier>);"
+                f" got {name!r}"
+            )
         if not isinstance(lua_body, str) or not lua_body.strip():
             raise ValueError("lua_body must be a non-empty string")
         now = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
@@ -180,9 +188,62 @@ class DynamicToolRegistry:
         JSON: avoids parsing JSON inside CE's Lua engine and sidesteps
         the named-pipe bridge's quirks with multi-line ``[==[...]==]``
         long-brackets that triggered upstream JSON-RPC parse errors.
+
+        Also wraps the user's body in an immediately-invoked function
+        and runs the captured return value through an inline JSON
+        encoder. Without this, upstream ``evaluate_lua`` calls
+        ``tostring()`` on the result — which prints ``table: 0x…``
+        for any non-scalar return, losing all the data the tool
+        intended to surface to the LLM.
+
+        Bridge bytestream caveat: miscusi-peek's named-pipe bridge
+        corrupts the JSON-RPC frame on some non-ASCII UTF-8 sequences
+        (em dashes, box-drawing characters) and returns a -32700 parse
+        error. Keep banner / comment text in this wrapper ASCII-only.
         """
         rendered = _render_lua_value(arguments or {})
-        return f"local params = {rendered}\n-- ── user-supplied body ──\n{tool.lua_body}\n"
+        return f"""local params = {rendered}
+-- inline JSON encoder so a tool body can ``return {{...}}`` naturally --
+local function _cegm_encode(v)
+  local t = type(v)
+  if t == 'nil' then return 'null' end
+  if t == 'boolean' then return v and 'true' or 'false' end
+  if t == 'number' then
+    if v ~= v then return 'null' end
+    if v == math.huge or v == -math.huge then return 'null' end
+    return tostring(v)
+  end
+  if t == 'string' then
+    local s = v
+    s = s:gsub('\\\\','\\\\\\\\'):gsub('"','\\\\"')
+    s = s:gsub('\\n','\\\\n'):gsub('\\r','\\\\r'):gsub('\\t','\\\\t')
+    return '"'..s..'"'
+  end
+  if t == 'table' then
+    local n = 0
+    for _ in pairs(v) do n = n + 1 end
+    local is_array = n > 0 and #v == n
+    local parts = {{}}
+    if is_array then
+      for i = 1, #v do parts[#parts+1] = _cegm_encode(v[i]) end
+      return '['..table.concat(parts, ',')..']'
+    end
+    for k, val in pairs(v) do
+      parts[#parts+1] = _cegm_encode(tostring(k))..':'.._cegm_encode(val)
+    end
+    return '{{'..table.concat(parts, ',')..'}}'
+  end
+  return _cegm_encode(tostring(v))
+end
+-- user-supplied body --
+local _cegm_ok, _cegm_result = pcall(function()
+{tool.lua_body}
+end)
+if not _cegm_ok then
+  return _cegm_encode({{error = tostring(_cegm_result)}})
+end
+return _cegm_encode(_cegm_result)
+"""
 
 
 def _render_lua_value(value: Any) -> str:  # noqa: PLR0911 — type-by-type fan-out

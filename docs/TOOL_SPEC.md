@@ -1,127 +1,172 @@
 # Tool Spec — what the LLM can call
 
-CEGM is a thin layer on top of [miscusi-peek/cheatengine-mcp-bridge](https://github.com/miscusi-peek/cheatengine-mcp-bridge). Tools come from two places:
+CEGM is a thin layer on top of [miscusi-peek/cheatengine-mcp-bridge](https://github.com/miscusi-peek/cheatengine-mcp-bridge). Tools come from three places:
 
-1. **Proxied tools** — the ~180 tools from miscusi-peek, exposed verbatim under their original names (e.g. `attach_process`, `read_memory`, `aob_scan`, `pointer_scan`, `disassemble`, `set_breakpoint`, …). We do not redocument them here; their canonical reference is [miscusi-peek's README](https://github.com/miscusi-peek/cheatengine-mcp-bridge#available-tools) and the runtime `tools/list` MCP call.
-2. **CEGM extras** — a small namespace `cegm.*` documented below. Every CEGM-namespaced symbol is implemented in our broker; none touch CE directly. They call back into proxied tools to read or write memory.
-
-This file is the contract for the **CEGM extras**. Every tool here must have:
-
-1. A signature in `broker/src/cegm_broker/tools.py` decorated with `@mcp.tool`.
-2. A handler with type hints and a Pydantic input model.
-3. A test in `broker/tests/test_tools_cegm.py`.
+1. **Proxied tools** — the ~173 tools from miscusi-peek, exposed verbatim under their original names (`open_process`, `read_memory`, `scan_all`, `aob_scan_module`, `set_breakpoint`, `evaluate_lua`, …). We do not redocument them here; their canonical reference is [miscusi-peek's README](https://github.com/miscusi-peek/cheatengine-mcp-bridge#available-tools) and the runtime `tools/list` MCP call.
+2. **CEGM extras** — a small `cegm.*` namespace documented below. Implemented in `broker/src/cegm_broker/mcp_extras.py`; tested in `broker/tests/test_extras.py`.
+3. **Custom (runtime-defined) tools** — anything starting with `custom.`. Defined via `cegm.tool_define` at runtime, persisted to `%LOCALAPPDATA%\CEGM\dynamic_tools.json`, dispatched by wrapping a stored Lua snippet in a small bootstrap and forwarding through proxied `evaluate_lua`.
 
 ## Conventions
 
-- All addresses are hex strings prefixed `0x` to avoid 64-bit JSON-number issues.
-- Value types match miscusi-peek's accepted set so previews/snapshots compose cleanly with their writes.
-- Every CEGM tool returns `{ ok: true, ... }` on success or raises `mcp.server.fastmcp.ToolError` with a stable `code` on failure.
-- All tools emit one or more events on the broker's event bus; events are versioned (`event_v: 1`).
+- Addresses: hex strings prefixed `0x`, or `<module>+<hex_offset>` (e.g. `ac_client.exe+0x18AC04`).
+- Value types (`vt`): `byte` / `int8` / `word` / `int16` / `dword` / `int` / `int32` / `qword` / `int64` / `float` / `double` / `string` — case-insensitive.
+- Every tool returns a JSON text block describing the result. Failures raise `ValueError` / `RuntimeError` / `KeyError` which the broker surfaces as MCP errors with the original message.
+- Most tools also publish a versioned event on the WebSocket bus (e.g. `scan_started`, `watch_update`, `dashboard_chat_request`). The dashboard's panels listen on these.
 
-## Tools
+## Shipped tools (current as of v0.1.0a1)
 
-### `cegm.preview_write`
+### Observability
 
-Stage a write without applying it. Useful when the LLM has determined an action but wants the user (or a higher-confidence pass) to confirm.
+#### `cegm.activity_recent`
 
-**Args:** `{ address: hex, vt: type, value: any, label?: string }`
-**Returns:** `{ ticket_id: uuid, current_value: any, would_become: any }`
-**Side effects:** `event_preview_pending` broadcast to dashboard subscribers; appended to `cegm://activity/recent`.
+Return the most recent CEGM events (tool calls, chat turns, scan / watch lifecycle, broker / CE status).
 
-### `cegm.commit_pending`
+- **Args:** `{ limit?: int = 50, max=500 }`
+- **Returns:** `{ events: Event[], count: int }`
+- Use when the LLM needs to recall what just happened without re-running tools.
 
-Apply a previously staged preview. Idempotent on the same `ticket_id`; subsequent calls return `{ ok: true, already_committed: true }`.
+#### `cegm.dashboard_chat`
 
-**Args:** `{ ticket_id: uuid }`
-**Returns:** `{ ok, address, before: any, after: any }`
-**Side effects:** invokes the appropriate proxied `memory_write*` tool; `event_preview_committed` broadcast.
+Hand off a chat message to the CEGM browser dashboard.
 
-### `cegm.cancel_pending`
+- **Args:** `{ message: string }` (non-empty)
+- **Returns:** `{ ok, url, delivered_at, dashboard_subscribers, note }`
+- **Side effect:** `dashboard_chat_request` event broadcast on the WebSocket bus; the dashboard's chat input auto-submits the message; tab title flashes; (with permission) a desktop notification appears.
 
-Discard a preview. No-op if already committed.
+### Scan workbench
 
-**Args:** `{ ticket_id: uuid }`
-**Returns:** `{ ok, was_pending: bool }`
+#### `cegm.scan`
 
-### `cegm.snapshot_take`
+First-scan wrapper. Calls upstream `scan_all` then immediately fetches the first page so the LLM doesn't have to issue a second `get_scan_results`.
 
-Capture current values at all CEGM-watched addresses (the addresses the user has added to the in-CE address list, plus any addresses the LLM has read or written this session).
+- **Args:** `{ value: string, vt?: string = "int32", max_results?: int = 50, protection?: string = "+W-C" }`
+- **Returns:** `{ scan_id, value, vt, count, page_size, results: [{address, value}] }`
+- **Side effect:** publishes `scan_started`. Broker keeps the first page snapshot so the dashboard's Scans tab can re-render it.
 
-**Args:** `{ label?: string }`
-**Returns:** `{ snapshot_id: uuid, address_count: int, label: string }`
-**Storage:** `%LOCALAPPDATA%\CEGM\snapshots\<session_id>\<snapshot_id>.json`
+#### `cegm.scan_narrow`
 
-### `cegm.snapshot_restore`
+Narrow the most recent scan via upstream `next_scan`.
 
-Atomically restore values at every address captured in a snapshot. Fails fast if any address is currently invalid (e.g. process detached); no partial restore.
+- **Args:** `{ op?: "exact"|"bigger"|"smaller"|"between"|"increased"|"decreased"|"changed"|"unchanged", value?: string, max_results?: int = 50 }`
+- **Returns:** `{ scan_id, parent_id, op, count, page_size, results }`
+- **Errors:** `ValueError("no active scan to narrow")` if `cegm.scan` hasn't been called this session.
+- **Side effect:** publishes `scan_narrowed`.
 
-**Args:** `{ snapshot_id: uuid }`
-**Returns:** `{ ok, restored: int, skipped: [{ address, reason }] }`
-**Side effects:** invokes proxied `memory_write*` per address; emits a single `event_snapshot_restored` summarizing the diff.
+#### `cegm.scan_drop`
 
-### `cegm.snapshot_list`
+Forget the most recent (or named) scan record. UI hygiene only; doesn't release upstream's `MemScan`.
 
-**Args:** `{}`
-**Returns:** `[ { snapshot_id, label, taken_at, address_count } ]`
+- **Args:** `{ scan_id?: string }`  (defaults to most recent)
+- **Returns:** `{ removed: bool, scan_id }`
+- **Side effect:** publishes `scan_dropped`.
 
-### `cegm.recipe_list` (Phase 3)
+### Live watches
 
-**Args:** `{}`
-**Returns:** `[ { name, description, args_schema, prompt_id } ]`
+The broker polls every watched address every ~250 ms and emits `watch_update` events on every change (plus a heartbeat every ~2 s).
 
-Initial recipes shipped: `find-numeric-stat`, `follow-pointer-chain`, `dissect-struct-at`.
+#### `cegm.watch_add`
 
-### `cegm.recipe_run` (Phase 3)
+Register an address as a live watch.
 
-Drive a multi-step workflow under a single LLM context. The recipe is implemented internally as an MCP `Prompt` plus a small state machine that issues tool calls in sequence.
+- **Args:** `{ address: string, vt?: string = "int32", label?: string = "" }`
+- **Returns:** `{ watch_id, address, vt, label }`
+- Idempotent on `(address, vt)` — re-adding updates the label.
+- **Side effect:** `watch_added` then `watch_update` on every change.
 
-**Args:** `{ name: string, args: object }`
-**Returns:** `{ ok, summary: string, results: object }`
+#### `cegm.watch_remove`
 
-## Resources
+Stop watching an address.
 
-| URI | Phase | Description |
-|---|---|---|
-| `cegm://activity/recent?limit=N` | P1 | last N events (tool calls, chat turns, status). Default `limit=50`, max `200`. |
-| `cegm://snapshots` | P3 | listing identical to `cegm.snapshot_list` |
-| `cegm://snapshots/{id}` | P3 | full snapshot contents |
-| `cegm://config` | P1 | sanitized view of runtime config (no secrets) |
+- **Args:** `{ key: string }`  (a `watch_id` or the literal address)
+- **Returns:** `{ removed: bool, key }`
 
-Resources are read-only and have no side effects, per MCP semantics. They exist so a model can re-read state without burning a tool budget.
+#### `cegm.watch_list`
+
+Snapshot of currently-active watches.
+
+- **Args:** `{}`
+- **Returns:** `{ watches: [{watch_id, address, vt, label, last_value, last_seen_ts, error}], count }`
+
+### Memory inspection
+
+#### `cegm.hex_dump`
+
+Read a region and return rows of 16 bytes formatted as offset / hex / ASCII. Handy for struct dissection without firing up CE's memory view.
+
+- **Args:** `{ address: string, length?: int = 64, max=4096 }`
+- **Returns:** `{ address, length, rows: [{offset, hex, ascii}], raw_upstream }`
+- **Failure mode:** if upstream `read_memory` fails, `rows: []` and `raw_upstream` carries the upstream error envelope.
+
+### Self-extension (runtime-defined tools)
+
+#### `cegm.tool_define`
+
+Register a runtime-defined tool. Names must start with `custom.` so they cannot shadow built-in or upstream tool names.
+
+- **Args:** `{ name: string (must match ^custom\.[A-Za-z_][A-Za-z0-9_.-]*$), description?: string, input_schema?: object, lua_body: string (non-empty) }`
+- **Returns:** `{ ok, tool: {name, description, input_schema, lua_body, created_at, updated_at} }`
+- **Side effect:** persists to `%LOCALAPPDATA%\CEGM\dynamic_tools.json`; emits `dynamic_tool_defined`; appears in the next `tools/list`.
+
+The `lua_body` runs inside CE's Lua engine on every call. It sees:
+
+- `params` — the call arguments rendered as a Lua table literal (no JSON parsing inside Lua).
+- All globals miscusi-peek's bridge exposes: `readBytes`, `readInteger`, `readFloat`, `readDouble`, `readString`, `readPointer`, `writeInteger`, `writeFloat`, `writeBytes`, `getOpenedProcessID`, `getAddress`, `getModuleSize`, `AOBScan`, `createMemScan`, etc.
+
+The body's return value is run through an inline Lua → JSON encoder, so a body can `return {hp=100, pos={1,2,3}}` naturally and the caller gets that as JSON. Errors raised inside the body are caught and surfaced as `{"error": "<message>"}`.
+
+> **Bridge bytestream caveat.** miscusi-peek's named-pipe JSON-RPC framing corrupts on certain non-ASCII UTF-8 sequences (em dashes, box-drawing characters). Keep your `lua_body` ASCII-only or use Lua escapes for non-ASCII string literals.
+
+#### `cegm.tool_undefine`
+
+Remove a custom tool.
+
+- **Args:** `{ name: string }`
+- **Returns:** `{ removed: bool, name }`
+- **Side effect:** removes from disk; emits `dynamic_tool_undefined`.
+
+#### `cegm.tool_list_custom`
+
+List runtime-defined tools.
+
+- **Args:** `{}`
+- **Returns:** `{ tools: CustomTool[], count }`
 
 ## Events on the WebSocket
 
-The dashboard subscribes to `ws://127.0.0.1:27077/events`. Frames are JSON objects, one event per frame:
+The dashboard subscribes to `ws://127.0.0.1:27077/events`. Each frame is one JSON object:
 
 ```jsonc
 {
-  "ts": "2026-05-03T14:22:01.123Z",
+  "ts": "2026-05-04T03:55:00.000Z",
+  "id": "evt-…",
   "kind": "tool_called" | "tool_result" | "tool_error"
         | "chat_user" | "chat_assistant" | "chat_token"
-        | "preview_pending" | "preview_committed" | "preview_canceled"
-        | "snapshot_taken" | "snapshot_restored"
-        | "broker_status" | "ce_status",
-  "id": "u-1",
+        | "scan_started" | "scan_narrowed" | "scan_dropped"
+        | "watch_added" | "watch_update" | "watch_removed"
+        | "dashboard_chat_request"
+        | "dynamic_tool_defined" | "dynamic_tool_undefined" | "dynamic_tool_called"
+        | "broker_status",
   "data": { /* kind-specific */ }
 }
 ```
 
-The same events are appended (without the `chat_token` ones — too noisy) to `%LOCALAPPDATA%\CEGM\activity\<session_id>.jsonl` for replay.
+`watch_update` carries `{ watch_id, address, vt, label, value, ts, changed }` (or `{ ..., error }` on a read failure).
 
-## Error envelope
+## Planned (not yet shipped)
 
-```jsonc
-{
-  "code": "ce_not_attached" | "preview_not_found" | "preview_already_committed" |
-          "snapshot_not_found" | "address_invalid" | "upstream_error" |
-          "config_invalid" | "validation_failed",
-  "message": "human-readable",
-  "data": { /* tool-specific */ }
-}
-```
+The original `TOOL_SPEC.md` listed these — they're tracked in [ROADMAP.md](ROADMAP.md) Phase 4 and will arrive together as the safety / undo layer.
 
-`upstream_error` is reserved for failures from the proxied miscusi-peek child; the original error from upstream is included in `data.upstream`.
+- `cegm.preview_write` — stage a memory write without applying.
+- `cegm.commit_pending` / `cegm.cancel_pending` — confirm or discard.
+- `cegm.snapshot_take` / `snapshot_restore` / `snapshot_list` — labeled rollback points.
+- `cegm.recipe_list` / `recipe_run` — guided multi-tool workflows for `find-numeric-stat`, `follow-pointer-chain`, `dissect-struct-at`, `code-cave-inject`, `aob-signature-lock`.
 
-## Versioning
+## Adding a new CEGM tool
 
-The broker handshake exchanges `cegm_version`, `proxy_version` (the pinned miscusi-peek commit), and a `tools_extras_version` hash. External MCP clients can read these via the standard `tools/list` `_meta` field.
+1. Add a `types.Tool(...)` entry to `EXTRAS_TOOL_DEFS` in `broker/src/cegm_broker/mcp_extras.py`.
+2. Add an `if name == "cegm.your_tool":` branch to `dispatch()` in the same file.
+3. Document it here under the right subsection.
+4. Add a test in `broker/tests/test_extras.py` (use the `_make_proxy(...)` helper if you need a fake upstream).
+5. Run `uv run ruff check . && uv run mypy && uv run pytest` — all green before committing.
+
+If the new behavior is something an LLM might mint at runtime instead, consider whether `cegm.tool_define` already handles it — adding a custom tool from the LLM side requires no broker code change.
