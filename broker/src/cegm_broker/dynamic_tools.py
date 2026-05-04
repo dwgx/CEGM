@@ -174,20 +174,42 @@ class DynamicToolRegistry:
 
     @staticmethod
     def render_invocation(tool: CustomTool, arguments: dict[str, Any]) -> str:
-        """Wrap the Lua body in a small bootstrap that exposes ``params``."""
-        # ``[[`` is Lua's long-bracket literal; ``]]`` closes it. We chunk
-        # nested ``]`` characters with ``]==]`` style if needed.
-        args_json = json.dumps(arguments or {}, ensure_ascii=False)
-        return (
-            f"local _cegm_args_raw = [==[{args_json}]==]\n"
-            "local params = {}\n"
-            "if _cegm_args_raw and #_cegm_args_raw > 0 then\n"
-            "  local ok, decoded = pcall(function()\n"
-            "    -- CE's bundled Lua doesn't ship dkjson; fall back to a tiny inline parser\n"
-            "    return loadstring('return ' .. _cegm_args_raw:gsub('null', 'nil'))()\n"
-            "  end)\n"
-            "  if ok and type(decoded) == 'table' then params = decoded end\n"
-            "end\n"
-            "-- ── user-supplied body ──\n"
-            f"{tool.lua_body}\n"
+        """Wrap the Lua body so it sees a global ``params`` table.
+
+        Renders the arguments as a Lua-source table literal rather than
+        JSON: avoids parsing JSON inside CE's Lua engine and sidesteps
+        the named-pipe bridge's quirks with multi-line ``[==[...]==]``
+        long-brackets that triggered upstream JSON-RPC parse errors.
+        """
+        rendered = _render_lua_value(arguments or {})
+        return f"local params = {rendered}\n-- ── user-supplied body ──\n{tool.lua_body}\n"
+
+
+def _render_lua_value(value: Any) -> str:  # noqa: PLR0911 — type-by-type fan-out
+    """Serialize a Python value as a Lua-source literal."""
+    if value is None:
+        return "nil"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    if isinstance(value, str):
+        # Use single-quoted Lua string with escapes for the few characters
+        # that don't survive a single-quoted literal.
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
         )
+        return f"'{escaped}'"
+    if isinstance(value, dict):
+        parts = []
+        for k, v in value.items():
+            key = str(k)
+            # Use ["key"] notation to be safe with non-identifier keys.
+            parts.append(f"[{_render_lua_value(key)}] = {_render_lua_value(v)}")
+        return "{" + ", ".join(parts) + "}"
+    if isinstance(value, list | tuple):
+        return "{" + ", ".join(_render_lua_value(v) for v in value) + "}"
+    return _render_lua_value(str(value))

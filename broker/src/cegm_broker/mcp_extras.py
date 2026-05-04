@@ -603,7 +603,7 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
         if custom is None:
             raise KeyError(f"custom tool not registered: {name!r}")
         wrapped = DynamicToolRegistry.render_invocation(custom, arguments)
-        upstream = await _upstream_call(proxy, "evaluate_lua", {"lua_code": wrapped})
+        upstream = await _upstream_call(proxy, "evaluate_lua", {"code": wrapped})
         await bus.publish(
             Event.make(
                 "dynamic_tool_called",
