@@ -2,7 +2,7 @@
 
 > A live, observable LLM-driven layer over Cheat Engine. Open CE → port `27077` is up → talk to the model from a browser tab or any MCP client (Claude Desktop, Cursor, Claude Code, Codex) → watch tool calls and memory diffs land in real time. Single-player offline use only.
 
-**Status:** alpha / WIP — Phase 1 (closed-loop MVP) in progress. See [docs/ROADMAP.md](docs/ROADMAP.md).
+**Status:** alpha (`v0.1.0a1`). Closed-loop MVP + RE Workbench shipped. Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What it is
 
@@ -67,16 +67,41 @@ scripts/        installer + dev helpers (Phase 5)
 examples/       MCP client config snippets
 ```
 
-## Install
+## Install (end users)
 
-Not yet released. Phase 1 lands the first usable build. Tracked at [#1](https://github.com/dwgx/CEGM/issues) (TBD). For developers cloning today:
+Two pieces:
+
+1. **Broker** (Python, runs on your machine, exposes `127.0.0.1:27077`):
+
+   ```powershell
+   uv tool install cegm-broker     # recommended (isolated)
+   # or
+   pip install cegm-broker
+   ```
+
+   Verify with `cegm-broker --version`. Start with `cegm-broker`.
+
+2. **Plugin bundle** (Lua autorun + C plugin DLL, copies into Cheat Engine):
+
+   - Download `CEGM-plugin-v0.1.0a1.zip` from the [latest GitHub Release](https://github.com/dwgx/CEGM/releases/latest).
+   - Unzip into your Cheat Engine 7.5+ install directory: `autorun\` and `plugins\` go into `<CE>\autorun\` / `<CE>\plugins\`.
+   - In CE: **Edit → Settings → Plugins** → tick **CEGM-x64** → OK.
+
+   Full step-by-step: `INSTALL.txt` inside the ZIP.
+
+3. Launch Cheat Engine, then open `http://127.0.0.1:27077/` in any browser. Or point an external MCP client at `http://127.0.0.1:27077/mcp` (sample configs in [`examples/`](examples/)).
+
+## Install (developers)
 
 ```bash
 git clone --recurse-submodules https://github.com/dwgx/CEGM.git
 cd CEGM/broker
 uv sync
-# scaffolding only at this point — no runnable broker yet
+uv run pytest          # 50 tests, ~67% coverage
+uv run cegm-broker     # http://127.0.0.1:27077/
 ```
+
+Build the C plugin DLL: `pwsh plugin/native/build.ps1` (needs VS 2022 C++ workload + Cheat Engine installed for the SDK header).
 
 ## Documentation
 
