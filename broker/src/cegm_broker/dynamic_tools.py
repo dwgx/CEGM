@@ -137,8 +137,7 @@ class DynamicToolRegistry:
         """
         if not isinstance(name, str) or not _NAME_PATTERN.match(name):
             raise ValueError(
-                f"name must match {_NAME_PATTERN.pattern!r} (custom.<identifier>);"
-                f" got {name!r}"
+                f"name must match {_NAME_PATTERN.pattern!r} (custom.<identifier>); got {name!r}"
             )
         if not isinstance(lua_body, str) or not lua_body.strip():
             raise ValueError("lua_body must be a non-empty string")
