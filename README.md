@@ -73,11 +73,15 @@ Two pieces:
 
 1. **Broker** (Python, runs on your machine, exposes `127.0.0.1:27077`):
 
+   While the PyPI [Trusted Publisher](docs/PYPI_SETUP.md) is being configured, install directly from the release wheel:
+
    ```powershell
-   uv tool install cegm-broker     # recommended (isolated)
+   uv tool install https://github.com/dwgx/CEGM/releases/download/v0.1.0a1/cegm_broker-0.1.0a1-py3-none-any.whl
    # or
-   pip install cegm-broker
+   pip install https://github.com/dwgx/CEGM/releases/download/v0.1.0a1/cegm_broker-0.1.0a1-py3-none-any.whl
    ```
+
+   Once PyPI publishing is live, the simpler `uv tool install cegm-broker` / `pip install cegm-broker` will work too.
 
    Verify with `cegm-broker --version`. Start with `cegm-broker`.
 
