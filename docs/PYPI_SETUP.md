@@ -1,8 +1,10 @@
 # PyPI Trusted Publisher setup
 
+> **Status:** done — `cegm-broker 0.1.0a1` is live at <https://pypi.org/project/cegm-broker/>. This doc is preserved for future reference (e.g. swapping the workflow filename or environment name) and as a record of the setup walkthrough.
+
 The release workflow at `.github/workflows/release.yml` publishes `cegm-broker` to PyPI via OIDC ("Trusted Publisher"). No API tokens are stored in the repo or in GitHub Actions secrets.
 
-This is a **one-time human setup** on the PyPI side. Until it's done, every `git push origin v*` will build and upload artifacts to GitHub Releases successfully, but the `Publish to PyPI` job will fail with:
+This was a **one-time human setup** on the PyPI side. Without it, every `git push origin v*` builds and uploads artifacts to GitHub Releases successfully, but the `Publish to PyPI` job fails with:
 
 ```
 * invalid-publisher: valid token, but no corresponding publisher (Publisher with matching claims was not found)
