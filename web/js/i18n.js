@@ -29,9 +29,17 @@ const STRINGS = {
     "chat.no_api_key_hint":
       "Tip: open Settings → save a DeepSeek API key, then retry.",
 
+    "sidebar.navigate": "Navigate",
+    "sidebar.tools": "Tools",
+    "sidebar.inspect": "Inspect",
+    "tabs.workspace": "Workspace",
+    "tabs.chat": "Chat",
+    "tabs.lua": "Lua",
+    "tabs.hex": "Hex",
     "tabs.activity": "Activity",
     "tabs.scans": "Scans",
     "tabs.watches": "Watches",
+    "tabs.timeline": "Timeline",
     "tabs.tools": "Tools",
 
     "activity.clear": "clear",
@@ -49,6 +57,7 @@ const STRINGS = {
     "watches.label": "Label",
     "watches.last_seen": "Last seen",
     "watches.remove": "Remove",
+    "watches.actions": "Act",
     "watches.error": "Error",
 
     "tools.search_placeholder": "filter by name or description…",
@@ -109,9 +118,17 @@ const STRINGS = {
     "chat.http_error": "（错误：HTTP %s%s）",
     "chat.no_api_key_hint": "提示：打开 Settings → 保存一个 DeepSeek API key 后重试。",
 
+    "sidebar.navigate": "导航",
+    "sidebar.tools": "工具",
+    "sidebar.inspect": "检查",
+    "tabs.workspace": "工作区",
+    "tabs.chat": "对话",
+    "tabs.lua": "Lua",
+    "tabs.hex": "Hex",
     "tabs.activity": "活动",
     "tabs.scans": "扫描",
     "tabs.watches": "监视",
+    "tabs.timeline": "时间线",
     "tabs.tools": "工具",
 
     "activity.clear": "清空",
@@ -129,6 +146,7 @@ const STRINGS = {
     "watches.label": "标签",
     "watches.last_seen": "最后变化",
     "watches.remove": "移除",
+    "watches.actions": "操作",
     "watches.error": "错误",
 
     "tools.search_placeholder": "按名称或描述过滤…",

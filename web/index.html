@@ -1,250 +1,288 @@
 <!doctype html>
-<html lang="en" class="h-full bg-zinc-950 text-zinc-100">
+<html lang="en" class="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark light" />
-    <title>CEGM Dashboard</title>
-
-    <!--
-      Tailwind CDN (Play CDN). Phase 5 will replace this with a built bundle.
-      JIT mode keeps the page small even with many utility classes.
-    -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        darkMode: "class",
-        theme: {
-          extend: {
-            fontFamily: {
-              mono: ['ui-monospace', 'SFMono-Regular', 'JetBrains Mono', 'monospace'],
-              sans: ['Inter', 'system-ui', 'sans-serif'],
-            },
-          },
-        },
-      };
-    </script>
+    <meta name="color-scheme" content="dark" />
+    <title>CEGM — AI Memory Editor</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
 
-  <body class="h-full antialiased">
-    <div id="app" class="flex h-full flex-col">
-      <!-- Header -->
-      <header class="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/60 px-6 py-3 backdrop-blur">
-        <div class="flex items-center gap-3">
-          <div class="flex h-8 w-8 items-center justify-center rounded bg-zinc-800 font-mono text-sm font-bold">CE</div>
-          <div>
-            <div class="font-semibold leading-tight">CheatEngineGM</div>
-            <div class="font-mono text-xs leading-tight text-zinc-400" data-bind="version">v0.1.0a1</div>
-          </div>
-        </div>
-
-        <div class="flex items-center gap-3">
-          <div class="flex items-center gap-2 text-sm">
-            <span id="status-dot" class="h-2 w-2 rounded-full bg-zinc-600 transition-colors"></span>
-            <span id="status-text" data-i18n="header.connecting" class="font-mono text-xs uppercase tracking-wider text-zinc-400">connecting</span>
-          </div>
-          <button
-            id="lang-toggle"
-            type="button"
-            data-i18n="header.lang_toggle"
-            data-i18n-title="header.lang_toggle_title"
-            class="rounded border border-zinc-700 px-2 py-1 font-mono text-xs hover:bg-zinc-800"
-          >中文</button>
-          <button
-            id="settings-toggle"
-            type="button"
-            data-i18n="header.settings"
-            class="rounded border border-zinc-700 px-3 py-1 text-sm hover:bg-zinc-800"
-            aria-controls="settings-drawer"
-          >Settings</button>
-        </div>
+  <body>
+    <div id="app">
+      <!-- ═══════════════════════════════════════════════════════════════ Toolbar -->
+      <header id="toolbar">
+        <span class="brand">CEGM</span>
+        <span class="sep"></span>
+        <span class="toolbar-process" id="tb-process">— no process —</span>
+        <span class="toolbar-spacer"></span>
+        <span class="toolbar-status">
+          <span class="toolbar-dot" id="tb-dot"></span>
+          <span id="tb-status-text">disconnected</span>
+        </span>
+        <span class="sep"></span>
+        <button class="btn btn-ghost btn-xs" id="btn-settings" data-i18n="header.settings" title="Settings">Settings</button>
+        <button class="btn btn-ghost btn-xs" id="btn-lang" title="Switch language">中</button>
+        <a href="http://127.0.0.1:27077/mcp" target="_blank"
+           class="btn btn-ghost btn-xs" style="font-family:var(--font-mono);font-size:10px">/mcp</a>
       </header>
 
-      <!-- Main split: chat (left) + timeline (right) -->
-      <main class="grid flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <!-- Chat column -->
-        <section class="flex min-h-0 flex-col border-r border-zinc-800">
-          <div
-            id="chat-log"
-            class="flex-1 space-y-3 overflow-y-auto p-6"
-            aria-live="polite"
-            data-i18n-aria-label="chat.welcome"
-          >
-            <p data-i18n="chat.welcome" class="text-sm text-zinc-500">
-              Type a message below. Tool calls run against Cheat Engine and show on the timeline as they happen.
-            </p>
-          </div>
-
-          <form id="chat-form" class="border-t border-zinc-800 bg-zinc-900/40 p-4">
-            <label for="chat-input" class="sr-only" data-i18n="chat.send">Message</label>
-            <div class="flex gap-2">
-              <textarea
-                id="chat-input"
-                rows="2"
-                data-i18n-placeholder="chat.placeholder"
-                placeholder="Ask the model to find / read / write memory…"
-                class="flex-1 resize-none rounded border border-zinc-700 bg-zinc-950 px-3 py-2 font-sans text-sm focus:border-zinc-500 focus:outline-none"
-              ></textarea>
-              <button
-                type="submit"
-                data-i18n="chat.send"
-                class="self-end rounded bg-emerald-600 px-4 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-zinc-700"
-              >Send</button>
+      <!-- ═══════════════════════════════════════════════════════════════ Main Area -->
+      <div id="main-area">
+        <!-- ── Sidebar ──────────────────────────────────────────────── -->
+        <nav id="sidebar">
+          <div class="sidebar-section">
+            <div class="sidebar-section-header" data-i18n="sidebar.navigate">Navigate</div>
+            <div class="sidebar-item active" data-nav="workspace">
+              <span class="sidebar-icon">▣</span> <span data-i18n="tabs.workspace">Workspace</span>
             </div>
-          </form>
-        </section>
+            <div class="sidebar-item" data-nav="chat">
+              <span class="sidebar-icon">&gt;</span> <span data-i18n="tabs.chat">Chat</span>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-section-header" data-i18n="sidebar.tools">Tools</div>
+            <div class="sidebar-item" data-nav="lua">
+              <span class="sidebar-icon">&lt;/&gt;</span> <span data-i18n="tabs.lua">Lua</span>
+            </div>
+            <div class="sidebar-item" data-nav="hex">
+              <span class="sidebar-icon">☷</span> <span data-i18n="tabs.hex">Hex</span>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-section-header" data-i18n="sidebar.inspect">Inspect</div>
+            <div class="sidebar-item" data-nav="scans">
+              <span class="sidebar-icon">◎</span> <span data-i18n="tabs.scans">Scans</span>
+            </div>
+            <div class="sidebar-item" data-nav="timeline">
+              <span class="sidebar-icon">◷</span> <span data-i18n="tabs.timeline">Timeline</span>
+            </div>
+            <div class="sidebar-item" data-nav="tools">
+              <span class="sidebar-icon">⊞</span> <span data-i18n="tabs.tools">Tools</span>
+            </div>
+          </div>
+          <div style="flex:1;"></div>
+        </nav>
 
-        <!-- Right column with tabs -->
-        <section class="flex min-h-0 flex-col">
-          <nav class="flex items-center gap-1 border-b border-zinc-800 px-3 py-2 text-xs"
-               role="tablist">
-            <button data-tab="activity"
-                    role="tab"
-                    aria-selected="true"
-                    data-i18n="tabs.activity"
-                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
-              Activity
-            </button>
-            <button data-tab="scans"
-                    role="tab"
-                    data-i18n="tabs.scans"
-                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
-              Scans
-            </button>
-            <button data-tab="watches"
-                    role="tab"
-                    data-i18n="tabs.watches"
-                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
-              Watches
-            </button>
-            <button data-tab="tools"
-                    role="tab"
-                    data-i18n="tabs.tools"
-                    class="rounded px-2 py-1 font-mono uppercase tracking-wider text-zinc-400 hover:text-zinc-200 data-[active=true]:bg-zinc-800 data-[active=true]:text-zinc-100">
-              Tools
-            </button>
-            <span class="flex-1"></span>
-            <button id="timeline-clear"
-                    type="button"
-                    data-i18n="activity.clear"
-                    class="font-mono text-xs uppercase tracking-wider text-zinc-500 hover:text-zinc-300">
-              clear
-            </button>
-          </nav>
-
-          <div data-tab-panel="activity" class="flex-1 overflow-y-auto">
-            <ol id="timeline" class="p-4 font-mono text-xs" aria-live="polite">
-              <li data-i18n="activity.empty" class="text-zinc-600">— no activity yet —</li>
-            </ol>
+        <!-- ── Content ──────────────────────────────────────────────── -->
+        <div id="content">
+          <!-- Tab bar -->
+          <div class="content-tabs" id="content-tabs">
+            <div class="content-tab active" data-content="workspace" data-i18n="tabs.workspace">Workspace</div>
+            <div class="content-tab" data-content="chat" data-i18n="tabs.chat">Chat</div>
+            <div class="content-tab" data-content="lua" data-i18n="tabs.lua">Lua</div>
+            <div class="content-tab" data-content="hex" data-i18n="tabs.hex">Hex</div>
+            <div class="content-tab" data-content="scans" data-i18n="tabs.scans">Scans</div>
+            <div class="content-tab" data-content="timeline" data-i18n="tabs.timeline">Timeline</div>
+            <div class="content-tab" data-content="tools" data-i18n="tabs.tools">Tools</div>
           </div>
 
-          <div data-tab-panel="scans" hidden id="scan-panel" class="flex-1 overflow-y-auto"></div>
-          <div data-tab-panel="watches" hidden id="watch-panel" class="flex-1 overflow-y-auto"></div>
-          <div data-tab-panel="tools" hidden id="tools-panel" class="flex-1 overflow-y-auto flex flex-col"></div>
-        </section>
-      </main>
+          <!-- Workspace -->
+          <div class="content-panel active" id="panel-workspace">
+            <div class="toolbar-row" id="ws-toolbar">
+              <input type="text" class="input input-mono input-sm" id="ws-addr" placeholder="0x… or module.exe+0x…" style="width:180px" />
+              <select class="input input-sm" id="ws-vt" style="width:80px">
+                <option value="int32">int32</option>
+                <option value="float">float</option>
+                <option value="double">double</option>
+                <option value="int64">int64</option>
+                <option value="byte">byte</option>
+                <option value="int16">int16</option>
+                <option value="string">string</option>
+              </select>
+              <input type="text" class="input input-sm" id="ws-label" placeholder="Name (e.g. HP)" style="width:120px" />
+              <button class="btn btn-primary btn-sm" id="ws-add">Add</button>
+              <span class="flex-1"></span>
+              <span class="text-muted text-sm" id="ws-summary"></span>
+            </div>
+            <div style="flex:1;overflow-y:auto;" id="ws-table-container">
+              <table class="data-table" id="ws-table">
+                <thead>
+                  <tr>
+                    <th>Name</th><th>Address</th><th>Type</th><th>Value</th>
+                    <th style="width:50px">Seen</th><th style="width:60px">Freeze</th><th style="width:30px"></th>
+                  </tr>
+                </thead>
+                <tbody id="ws-tbody"></tbody>
+              </table>
+              <div id="ws-empty" style="display:flex;align-items:center;justify-content:center;height:120px;color:hsl(var(--muted-foreground));font-size:12px">
+                No addresses yet. Use the chat to find values, or add one above.
+              </div>
+            </div>
+          </div>
+
+          <!-- Chat -->
+          <div class="content-panel" id="panel-chat">
+            <div id="chat-panel">
+              <div id="chat-log">
+                <div class="chat-msg system">Type a message below. The AI can scan memory, find values, and modify them in real time.</div>
+              </div>
+              <form id="chat-form" autocomplete="off">
+                <textarea id="chat-input" rows="2" placeholder="e.g. Find HP value, current is 100…" ></textarea>
+                <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end">Send</button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Scans -->
+          <div class="content-panel" id="panel-scans">
+            <div id="scan-list" style="overflow-y:auto;flex:1;padding:8px;"></div>
+          </div>
+
+          <!-- Timeline -->
+          <div class="content-panel" id="panel-timeline">
+            <div style="overflow-y:auto;flex:1;padding:8px;" id="timeline-list"></div>
+          </div>
+
+          <!-- Lua Playground -->
+          <div class="content-panel" id="panel-lua">
+            <div style="display:flex;flex-direction:column;height:100%;">
+              <div class="toolbar-row">
+                <span style="font-size:11px;font-weight:600;color:hsl(var(--muted-foreground));">Lua Sandbox</span>
+                <span class="flex-1"></span>
+                <button class="btn btn-outline btn-xs" id="lua-clear">Clear</button>
+                <button class="btn btn-primary btn-xs" id="lua-run">Run ▶</button>
+              </div>
+              <textarea id="lua-editor" style="flex:1;background:hsl(var(--background));color:hsl(var(--foreground));border:none;padding:10px;font-family:var(--font-mono);font-size:11px;resize:none;outline:none;line-height:1.6;" placeholder="-- Lua code runs inside Cheat Engine --
+-- Examples:
+-- return readInteger('0x00400000')
+-- return getOpenedProcessID()
+-- local hp = readInteger(params.addr)
+-- writeInteger(params.addr, 9999)
+-- return 'done'"></textarea>
+              <div id="lua-output" style="max-height:180px;overflow-y:auto;background:hsl(var(--surface));border-top:1px solid hsl(var(--border));padding:8px;font-family:var(--font-mono);font-size:10px;color:hsl(var(--muted-foreground));min-height:40px;">
+                Output appears here…
+              </div>
+            </div>
+          </div>
+
+          <!-- Hex Viewer -->
+          <div class="content-panel" id="panel-hex">
+            <div style="display:flex;flex-direction:column;height:100%;">
+              <div class="toolbar-row">
+                <input type="text" class="input input-mono input-sm" id="hex-addr" placeholder="0x… or module.exe+0x…" style="width:200px" />
+                <input type="number" class="input input-sm" id="hex-len" value="128" min="16" max="4096" step="16" style="width:70px" />
+                <button class="btn btn-primary btn-xs" id="hex-read">Read</button>
+                <span class="flex-1"></span>
+                <button class="btn btn-ghost btn-xs" id="hex-nav-up16">−16</button>
+                <button class="btn btn-ghost btn-xs" id="hex-nav-up64">−64</button>
+                <button class="btn btn-ghost btn-xs" id="hex-nav-dn64">+64</button>
+                <button class="btn btn-ghost btn-xs" id="hex-nav-dn16">+16</button>
+              </div>
+              <div id="hex-output" style="flex:1;overflow-y:auto;padding:8px;font-family:var(--font-mono);font-size:11px;line-height:1.6;white-space:pre;color:hsl(var(--foreground));">
+                Enter an address and click Read.
+              </div>
+            </div>
+          </div>
+
+          <!-- Tools -->
+          <div class="content-panel" id="panel-tools">
+            <div class="toolbar-row">
+              <input type="text" class="input input-sm" placeholder="Filter tools…" id="tools-filter" style="width:220px" />
+              <span class="flex-1"></span>
+              <button class="btn btn-ghost btn-xs" id="tools-refresh">Refresh</button>
+            </div>
+            <div style="flex:1;overflow-y:auto;" id="tools-list"></div>
+          </div>
+        </div>
+
+        <!-- ── Inspector ────────────────────────────────────────────── -->
+        <aside id="inspector">
+          <div class="inspector-header">Inspector</div>
+          <div class="inspector-empty" id="insp-empty">Select an address to inspect</div>
+          <div id="insp-detail" hidden>
+            <div class="inspector-field">
+              <label class="inspector-label">Label</label>
+              <input type="text" class="inspector-value input-mono" id="insp-label" />
+            </div>
+            <div class="inspector-row">
+              <span class="inspector-row-label">Address</span>
+              <span class="inspector-row-value" id="insp-addr">—</span>
+            </div>
+            <div class="inspector-row">
+              <span class="inspector-row-label">Type</span>
+              <span class="inspector-row-value" id="insp-vt">—</span>
+            </div>
+            <div class="inspector-field">
+              <label class="inspector-label">Current Value</label>
+              <input type="text" class="inspector-value input-mono" id="insp-value" readonly />
+            </div>
+            <div class="inspector-field">
+              <label class="inspector-label">New Value</label>
+              <div style="display:flex;gap:4px">
+                <input type="text" class="inspector-value input-mono" id="insp-new-value" placeholder="Write new value…" />
+                <button class="btn btn-primary btn-xs" id="insp-write">Write</button>
+              </div>
+            </div>
+            <div class="inspector-row">
+              <span class="inspector-row-label">Freeze</span>
+              <button class="toggle" id="insp-freeze-toggle">
+                <span class="toggle-knob"></span>
+              </button>
+            </div>
+            <div class="inspector-field" id="insp-freeze-val-field" hidden>
+              <label class="inspector-label">Freeze at</label>
+              <input type="text" class="inspector-value input-mono" id="insp-freeze-value" placeholder="9999" />
+            </div>
+            <div class="inspector-field" style="padding-top:10px">
+              <button class="btn btn-destructive btn-sm" id="insp-remove" style="width:100%">Remove</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════════ Console -->
+      <div id="console-area">
+        <div class="console-header" id="console-header">
+          <span>Console</span>
+          <div class="console-actions">
+            <button class="btn btn-ghost btn-xs" id="console-clear">Clear</button>
+          </div>
+        </div>
+        <div class="console-body" id="console-body"></div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════════ Status Bar -->
+      <footer id="statusbar">
+        <span class="statusbar-item" id="sb-version">v0.1.0a1</span>
+        <span class="statusbar-sep"></span>
+        <span class="statusbar-item" id="sb-proxy">proxy: —</span>
+        <span class="statusbar-sep"></span>
+        <span class="statusbar-item" id="sb-tools">tools: 0</span>
+        <span class="statusbar-sep"></span>
+        <span class="statusbar-item" id="sb-watches">watches: 0</span>
+        <span style="flex:1;"></span>
+        <span class="statusbar-item">127.0.0.1:27077</span>
+      </footer>
     </div>
 
-    <!-- Settings drawer (hidden by default) -->
-    <aside
-      id="settings-drawer"
-      hidden
-      class="fixed inset-y-0 right-0 z-30 flex w-full max-w-md flex-col border-l border-zinc-800 bg-zinc-950/95 shadow-2xl backdrop-blur"
-      aria-labelledby="settings-title"
-    >
-      <header class="flex items-center justify-between border-b border-zinc-800 px-6 py-3">
-        <h2 id="settings-title" data-i18n="settings.title" class="text-sm font-semibold">Settings</h2>
-        <button
-          type="button"
-          data-close-drawer
-          data-i18n="settings.close"
-          class="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-        >Close</button>
-      </header>
-      <form id="settings-form" class="flex flex-1 flex-col gap-4 overflow-y-auto p-6 text-sm">
-        <fieldset>
-          <legend data-i18n="settings.llm_endpoint" class="mb-2 font-semibold">LLM endpoint</legend>
-          <label class="block">
-            <span data-i18n="settings.base_url" class="font-mono text-xs uppercase tracking-wider text-zinc-400">Base URL</span>
-            <input
-              name="base_url"
-              type="url"
-              class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
-              placeholder="https://api.deepseek.com/v1"
-            />
-          </label>
-          <label class="mt-3 block">
-            <span data-i18n="settings.api_key" class="font-mono text-xs uppercase tracking-wider text-zinc-400">API key</span>
-            <input
-              name="api_key"
-              type="password"
-              autocomplete="off"
-              class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
-              data-i18n-placeholder="settings.api_key_placeholder"
-              placeholder="sk-…"
-            />
-          </label>
-          <label class="mt-3 block">
-            <span data-i18n="settings.model" class="font-mono text-xs uppercase tracking-wider text-zinc-400">Model</span>
-            <input
-              name="model"
-              type="text"
-              class="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
-              placeholder="deepseek-chat"
-            />
+    <!-- ═══════════════════════════════════════════════════════════════ Settings drawer -->
+    <aside id="settings-drawer" hidden
+      style="position:fixed;inset-y:0;right:0;z-index:50;width:100%;max-width:380px;
+             background:hsl(var(--surface));border-left:1px solid hsl(var(--border-strong));
+             display:flex;flex-direction:column;overflow-y:auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid hsl(var(--border));">
+        <span style="font-size:14px;font-weight:600;">Settings</span>
+        <button class="btn btn-ghost btn-sm" id="settings-close">Close</button>
+      </div>
+      <form id="settings-form" style="display:flex;flex-direction:column;gap:14px;padding:16px;font-size:12px;">
+        <fieldset style="border:none;display:flex;flex-direction:column;gap:6px;">
+          <legend style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:hsl(var(--muted-foreground));margin-bottom:4px;">LLM Endpoint</legend>
+          <label style="font-size:10px;text-transform:uppercase;color:hsl(var(--muted-foreground));">Base URL</label>
+          <input name="base_url" type="url" class="input input-mono input-sm" placeholder="https://api.deepseek.com/v1" />
+          <label style="font-size:10px;text-transform:uppercase;color:hsl(var(--muted-foreground));">API Key</label>
+          <input name="api_key" type="password" class="input input-mono input-sm" placeholder="sk-…" autocomplete="off" />
+          <label style="font-size:10px;text-transform:uppercase;color:hsl(var(--muted-foreground));">Model</label>
+          <input name="model" type="text" class="input input-mono input-sm" placeholder="deepseek-chat" />
+        </fieldset>
+        <fieldset style="border:none;display:flex;flex-direction:column;gap:6px;">
+          <legend style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:hsl(var(--muted-foreground));margin-bottom:4px;">Safety</legend>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;">
+            <input name="preview_writes_default" type="checkbox" style="accent-color:hsl(var(--primary));" />
+            Preview every memory write
           </label>
         </fieldset>
-
-        <fieldset>
-          <legend data-i18n="settings.mcp_endpoint" class="mb-2 font-semibold">MCP endpoint</legend>
-          <p data-i18n="settings.mcp_blurb" class="mb-2 text-xs text-zinc-400">
-            Point any MCP client (Claude Desktop, Cursor, Codex, Claude Code) at this URL.
-            No per-host setup needed — as long as Cheat Engine is running, the URL is live.
-          </p>
-          <div class="flex gap-2">
-            <input
-              id="mcp-url"
-              type="text"
-              readonly
-              class="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
-            />
-            <button
-              type="button"
-              id="mcp-url-copy"
-              data-i18n="settings.copy"
-              class="rounded border border-zinc-700 px-3 text-xs hover:bg-zinc-800"
-            >Copy</button>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend data-i18n="settings.ce_ui" class="mb-2 font-semibold">Cheat Engine UI</legend>
-          <label class="flex items-center gap-2">
-            <input name="show_status_form" type="checkbox" class="h-4 w-4 accent-emerald-600" />
-            <span data-i18n="settings.show_form">Show CEGM status window on Cheat Engine startup</span>
-          </label>
-          <p data-i18n="settings.show_form_hint" class="mt-1 text-xs text-zinc-500">
-            Off by default. The broker is started either by the C plugin
-            (Open CEGM Dashboard menu, silent) or by you running
-            ``cegm-broker --port 27077`` manually. The Lua autorun does
-            not spawn the broker.
-          </p>
-        </fieldset>
-
-        <fieldset>
-          <legend data-i18n="settings.safety" class="mb-2 font-semibold">Safety</legend>
-          <label class="flex items-center gap-2">
-            <input name="preview_writes_default" type="checkbox" class="h-4 w-4 accent-emerald-600" />
-            <span data-i18n="settings.preview_writes">Preview every memory write before applying</span>
-          </label>
-        </fieldset>
-
-        <button
-          type="submit"
-          data-i18n="settings.save"
-          class="mt-auto rounded bg-emerald-600 px-4 py-2 text-sm font-semibold hover:bg-emerald-500"
-        >Save</button>
+        <button type="submit" class="btn btn-primary" style="margin-top:auto;">Save</button>
       </form>
     </aside>
 

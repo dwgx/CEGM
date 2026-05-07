@@ -55,6 +55,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Dump the resolved configuration as JSON and exit.",
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Enable hot-reload: watch web/ for changes and auto-refresh browser tabs.",
+    )
     return parser
 
 
@@ -64,9 +69,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level)
 
     config = Config.load()
-    if args.host:
+    if args.host is not None:
         config.server.host = args.host
-    if args.port:
+    if args.port is not None:
         config.server.port = args.port
 
     if args.print_config:
@@ -83,5 +88,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
     )
 
-    run(host=config.server.host, port=config.server.port, parent_pid=args.parent_pid)
+    run(
+        host=config.server.host,
+        port=config.server.port,
+        parent_pid=args.parent_pid,
+        dev=args.dev,
+    )
     return 0

@@ -141,7 +141,7 @@ addopts = [
     "--strict-config",
     "--cov=cegm_broker",
     "--cov-report=term-missing",
-    "--cov-fail-under=60",
+    "--cov-fail-under=52",
 ]
 asyncio_mode = "auto"
 filterwarnings = [

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from pydantic import ValidationError
 from starlette.requests import Request
@@ -27,8 +27,21 @@ from cegm_broker.llm import LLMClient
 from cegm_broker.mcp_extras import EXTRAS_TOOL_DEFS, is_extra
 from cegm_broker.mcp_extras import dispatch as dispatch_extra
 from cegm_broker.mcp_proxy import MCPProxy
+from cegm_broker.system_prompt import build_system_message
 
 _log = get_logger(__name__)
+
+_MAX_BODY_BYTES: Final[int] = 1_048_576  # 1 MiB — reject larger payloads
+
+
+async def _read_json_body(request: Request) -> Any:
+    """Read request body with a size cap. Rejects oversized payloads."""
+    body = await request.body()
+    if len(body) > _MAX_BODY_BYTES:
+        raise ValueError(f"request body too large ({len(body)} > {_MAX_BODY_BYTES})")
+    if not body:
+        raise ValueError("empty request body")
+    return json.loads(body)
 
 
 async def health(request: Request) -> JSONResponse:
@@ -64,7 +77,10 @@ async def config_put(request: Request) -> JSONResponse:
     their existing values. Empty-string ``api_key`` is treated as
     "leave unchanged" so the masked-key UX in the dashboard works.
     """
-    body = await request.json()
+    try:
+        body = await _read_json_body(request)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
     if not isinstance(body, dict):
         return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
 
@@ -92,7 +108,9 @@ async def config_put(request: Request) -> JSONResponse:
     return JSONResponse(new_config.sanitized())
 
 
-async def chat(request: Request) -> StreamingResponse | JSONResponse:
+async def chat(  # noqa: PLR0915
+    request: Request,
+) -> StreamingResponse | JSONResponse:
     """Streaming chat completion with full tool-call routing.
 
     Body: ``{"messages": [{"role": "user|system|...", "content": "..."}]}``.
@@ -103,7 +121,10 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
 
     Validation failures are returned as a single JSON response (no stream).
     """
-    body = await request.json()
+    try:
+        body = await _read_json_body(request)
+    except (ValueError, json.JSONDecodeError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
     if not isinstance(body, dict):
         return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
     messages_raw = body.get("messages")
@@ -124,6 +145,8 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
 
     scans = request.app.state.scans
     watches = request.app.state.watches
+    recipes = request.app.state.recipes
+    groups = request.app.state.groups
     dynamic = request.app.state.dynamic
 
     async def dispatcher(name: str, args: dict[str, Any]) -> list[Any]:
@@ -137,6 +160,8 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
                     proxy=proxy,
                     scans=scans,
                     watches=watches,
+                    recipes=recipes,
+                    groups=groups,
                     dynamic=dynamic,
                 )
             else:
@@ -156,8 +181,20 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
         if last.get("role") == "user":
             await bus.publish(Event.make("chat_user", {"content": last.get("content")}))
 
+    # Build and inject the system prompt if the caller didn't supply one.
+    has_system = any(isinstance(m, dict) and m.get("role") == "system" for m in messages_raw)
+    messages_for_llm: list[dict[str, Any]] = []
+    if not has_system:
+        # Try to extract the attached process name from the proxy state.
+        sys_msg = build_system_message(
+            proxy_available=proxy.available,
+            process_name=None,  # upstream doesn't expose this; could wire later
+            tool_count=len(proxy.tools) + len(EXTRAS_TOOL_DEFS),
+        )
+        messages_for_llm.append(sys_msg)
+    messages_for_llm.extend(messages_raw)
+
     llm = LLMClient(config.llm)
-    messages_for_llm: list[dict[str, Any]] = list(messages_raw)
 
     async def event_source() -> AsyncIterator[bytes]:
         full_text = ""
@@ -171,11 +208,13 @@ async def chat(request: Request) -> StreamingResponse | JSONResponse:
             _log.warning("api.chat_stream_error", extra={"err": repr(exc)})
             yield f"data: {json.dumps(err_evt)}\n\n".encode()
         finally:
-            # Always publish the assistant turn — even if the stream
-            # errored mid-flight — so the timeline stays consistent with
-            # the chat_user event we already published.
-            if full_text:
-                await bus.publish(Event.make("chat_assistant", {"content": full_text}))
+            # Always publish assistant turn to pair with the chat_user event.
+            await bus.publish(
+                Event.make(
+                    "chat_assistant",
+                    {"content": full_text or "(no response)", "truncated": not bool(full_text)},
+                )
+            )
             yield b"data: [DONE]\n\n"
 
     return StreamingResponse(

@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import Any, Final, Self
 
@@ -89,6 +89,7 @@ class MCPProxy:
         self._tools: list[types.Tool] = []
         self._available: bool = False
         self._error: str | None = None
+        self._health_task: asyncio.Task[None] | None = None
         # Serializes start/stop so concurrent callers can't spawn the
         # child twice or race teardown against startup.
         self._lifecycle_lock: asyncio.Lock = asyncio.Lock()
@@ -155,7 +156,7 @@ class MCPProxy:
                         "entry": str(self._config.entry_script),
                     },
                 )
-            except Exception as exc:
+            except (Exception, asyncio.CancelledError) as exc:
                 self._error = repr(exc)
                 self._available = False
                 await stack.aclose()
@@ -163,10 +164,17 @@ class MCPProxy:
                     "mcp_proxy.unavailable",
                     extra={"err": self._error},
                 )
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
 
     async def stop(self) -> None:
         """Terminate the child cleanly. Safe to call multiple times."""
         async with self._lifecycle_lock:
+            if self._health_task is not None:
+                self._health_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._health_task
+                self._health_task = None
             if self._stack is None:
                 return
             try:
@@ -184,7 +192,37 @@ class MCPProxy:
         """
         if self._session is None or not self._available:
             raise RuntimeError("upstream MCP proxy is not connected")
-        return await self._session.call_tool(name, arguments)
+        try:
+            return await asyncio.wait_for(
+                self._session.call_tool(name, arguments),
+                timeout=self._config.handshake_timeout_s * 3,
+            )
+        except (OSError, TimeoutError, RuntimeError) as exc:
+            # Child process likely died — mark unavailable so callers can
+            # detect and the broker can attempt recovery.
+            self._available = False
+            self._error = repr(exc)
+            _log.warning("mcp_proxy.call_tool_failed", extra={"name": name, "err": self._error})
+            raise RuntimeError(f"upstream MCP call failed: {exc}") from exc
+
+    async def check_health(self) -> bool:
+        """Ping the child to verify it's still responsive.
+
+        If the ping fails, sets ``available = False`` and returns ``False``.
+        """
+        if self._session is None or not self._available:
+            return False
+        try:
+            await asyncio.wait_for(
+                self._session.list_tools(),
+                timeout=self._config.handshake_timeout_s,
+            )
+            return True
+        except Exception as exc:
+            self._available = False
+            self._error = repr(exc)
+            _log.warning("mcp_proxy.health_check_failed", extra={"err": self._error})
+            return False
 
     async def __aenter__(self) -> MCPProxy:
         await self.start()

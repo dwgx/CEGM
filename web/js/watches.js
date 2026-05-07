@@ -46,7 +46,7 @@ function ensureTable() {
     const thead = document.createElement("thead");
     thead.className = "text-[10px] uppercase tracking-wider text-zinc-500";
     const trh = document.createElement("tr");
-    for (const key of ["watches.address", "watches.value", "watches.label", "watches.last_seen", ""]) {
+    for (const key of ["watches.address", "watches.value", "watches.label", "watches.last_seen", "watches.actions"]) {
       const th = document.createElement("th");
       th.className = "px-2 py-1 text-left";
       if (key) {
@@ -92,20 +92,57 @@ function render() {
 
     tr.append(cell(w.address, "text-zinc-300"));
     if (w.error) {
-      const errCell = cell(w.error, "text-red-400");
-      tr.append(errCell);
+      tr.append(cell(w.error, "text-red-400"));
     } else {
       const v = typeof w.value === "object" ? JSON.stringify(w.value) : String(w.value ?? "—");
-      tr.append(cell(v, "text-emerald-300"));
+      const vc = w.frozen ? "text-cyan-300 font-semibold" : "text-emerald-300";
+      tr.append(cell(v, vc));
     }
     tr.append(cell(w.label || "", "text-zinc-500"));
     tr.append(cell(timeShort(w.ts), "text-zinc-500"));
 
+    // Actions cell
+    const actionsTd = document.createElement("td");
+    actionsTd.className = "px-2 py-1 flex flex-wrap gap-1";
+
+    // Freeze button
+    if (!w.frozen) {
+      const fzBtn = document.createElement("button");
+      fzBtn.type = "button";
+      fzBtn.textContent = "❄";
+      fzBtn.title = "Freeze at current value";
+      fzBtn.className = "rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] hover:bg-cyan-900/40";
+      fzBtn.addEventListener("click", async () => {
+        const target = window.prompt("Freeze value:", String(w.value ?? ""));
+        if (target == null) return;
+        try {
+          await callMcp("cegm.watch_freeze", {key: w.watch_id, value: target});
+        } catch (err) {
+          console.error(err);
+        }
+      });
+      actionsTd.append(fzBtn);
+    } else {
+      const ufBtn = document.createElement("button");
+      ufBtn.type = "button";
+      ufBtn.textContent = "🧊";
+      ufBtn.title = `Frozen at ${w.freeze_value}. Click to unfreeze.`;
+      ufBtn.className = "rounded border border-cyan-700 bg-cyan-900/30 px-1.5 py-0.5 text-[11px] hover:bg-cyan-900/60";
+      ufBtn.addEventListener("click", async () => {
+        try {
+          await callMcp("cegm.watch_unfreeze", {key: w.watch_id});
+        } catch (err) {
+          console.error(err);
+        }
+      });
+      actionsTd.append(ufBtn);
+    }
+
     const rmBtn = document.createElement("button");
     rmBtn.type = "button";
-    rmBtn.dataset.i18n = "watches.remove";
-    rmBtn.textContent = t("watches.remove");
-    rmBtn.className = "rounded border border-zinc-700 px-2 py-0.5 text-[11px] hover:bg-zinc-800";
+    rmBtn.textContent = "✕";
+    rmBtn.title = t("watches.remove");
+    rmBtn.className = "rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] hover:bg-red-900/40 text-red-400";
     rmBtn.addEventListener("click", async () => {
       try {
         await callMcp("cegm.watch_remove", {key: w.watch_id});
@@ -113,7 +150,9 @@ function render() {
         console.error(err);
       }
     });
-    tr.append(cell(rmBtn));
+    actionsTd.append(rmBtn);
+
+    tr.append(actionsTd);
 
     tbody.append(tr);
   }
@@ -144,6 +183,22 @@ function handleEvent(evt) {
     row.error = data.error || null;
     state.set(row.watch_id, row);
     render();
+  } else if (evt.kind === "watch_frozen") {
+    const row = state.get(data.watch_id);
+    if (row) {
+      row.frozen = true;
+      row.freeze_value = data.freeze_value;
+      state.set(row.watch_id, row);
+      render();
+    }
+  } else if (evt.kind === "watch_unfrozen") {
+    const row = state.get(data.watch_id);
+    if (row) {
+      row.frozen = false;
+      row.freeze_value = null;
+      state.set(row.watch_id, row);
+      render();
+    }
   } else if (evt.kind === "watch_removed") {
     // The event uses the address/key the user passed in; we may need to
     // match by either watch_id or address.

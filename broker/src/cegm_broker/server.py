@@ -37,8 +37,11 @@ from cegm_broker.api import chat, config_get, config_put, health
 from cegm_broker.config import Config
 from cegm_broker.dynamic_tools import DynamicToolRegistry
 from cegm_broker.event_bus import Event, EventBus
+from cegm_broker.groups import GroupRegistry
+from cegm_broker.hot_reload import watch_web_dir
 from cegm_broker.mcp_proxy import MCPProxy, ProxyConfig
 from cegm_broker.mcp_server import build_server
+from cegm_broker.recipes import RecipeRegistry
 from cegm_broker.scans import ScanRegistry
 from cegm_broker.watches import WatchRegistry
 from cegm_broker.ws import events_endpoint
@@ -54,7 +57,7 @@ _log = get_logger(__name__)
 _WEB_DIR: Path = Path(__file__).resolve().parents[3] / "web"
 
 
-def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]  # noqa: PLR0915
+def _make_lifespan(parent_pid: int | None, *, dev: bool = False):  # type: ignore[no-untyped-def]  # noqa: PLR0915
     """Build a lifespan context manager bound to a particular ``parent_pid``."""
 
     @asynccontextmanager
@@ -65,6 +68,14 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]  # n
         await proxy.start()  # graceful failure if upstream isn't reachable
 
         scans = ScanRegistry()
+        try:
+            restored_scans = scans.load_from_disk()
+        except OSError:
+            restored_scans = 0
+        recipes = RecipeRegistry()
+        groups = GroupRegistry()
+        with contextlib.suppress(OSError):
+            groups.load_from_disk()
         dynamic = DynamicToolRegistry()
 
         async def _read_value(address: str, vt: str) -> object:
@@ -89,7 +100,29 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]  # n
                         return text
             return None
 
-        watches = WatchRegistry(bus=bus, reader=_read_value)
+        async def _write_value(address: str, vt: str, value: object) -> None:
+            """Bridge the watch freezer into the MCP proxy's write family."""
+            if not proxy.available:
+                raise RuntimeError("proxy unavailable")
+            if vt in ("float", "double"):
+                tool = "write_float"
+            elif vt == "string":
+                tool = "write_string"
+            else:
+                tool = "write_integer"
+            raw = str(value) if not isinstance(value, str) else value
+            await proxy.call_tool(tool, {"address": address, "value": raw})
+
+        watches = WatchRegistry(bus=bus, reader=_read_value, writer=_write_value)
+        try:
+            restored_watches = watches.load_from_disk()
+        except OSError:
+            restored_watches = 0
+        if restored_scans or restored_watches:
+            _log.info(
+                "broker.session_restored",
+                extra={"scans": restored_scans, "watches": restored_watches},
+            )
         watches.start()
 
         await bus.publish(
@@ -106,7 +139,15 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]  # n
             )
         )
 
-        mcp_server = build_server(proxy, bus, scans=scans, watches=watches, dynamic=dynamic)
+        mcp_server = build_server(
+            proxy,
+            bus,
+            scans=scans,
+            watches=watches,
+            recipes=recipes,
+            dynamic=dynamic,
+            groups=groups,
+        )
         session_mgr = StreamableHTTPSessionManager(
             mcp_server,
             json_response=True,
@@ -114,17 +155,24 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]  # n
         )
 
         watcher_task: asyncio.Task[None] | None = None
+        hot_reload_task: asyncio.Task[None] | None = None
         async with session_mgr.run():
             app.state.config = config
             app.state.bus = bus
             app.state.proxy = proxy
             app.state.scans = scans
             app.state.watches = watches
+            app.state.recipes = recipes
+            app.state.groups = groups
             app.state.dynamic = dynamic
             app.state.mcp_session_mgr = session_mgr
 
             if parent_pid is not None:
                 watcher_task = asyncio.create_task(parent_watch.watch(parent_pid))
+
+            if dev and _WEB_DIR.is_dir():
+                hot_reload_task = asyncio.create_task(watch_web_dir(_WEB_DIR, bus))
+                _log.info("broker.hot_reload_enabled", extra={"web_dir": str(_WEB_DIR)})
 
             _log.info(
                 "broker.lifespan_started",
@@ -133,11 +181,16 @@ def _make_lifespan(parent_pid: int | None):  # type: ignore[no-untyped-def]  # n
                     "port": config.server.port,
                     "proxy_available": proxy.available,
                     "custom_tool_count": len(dynamic.all()),
+                    "dev_mode": dev,
                 },
             )
             try:
                 yield
             finally:
+                if hot_reload_task is not None:
+                    hot_reload_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await hot_reload_task
                 if watcher_task is not None:
                     watcher_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
@@ -175,7 +228,7 @@ class _MCPRouteApp:
         await session_mgr.handle_request(scope, receive, send)
 
 
-def build_app(parent_pid: int | None = None) -> ASGIApp:
+def build_app(parent_pid: int | None = None, *, dev: bool = False) -> ASGIApp:
     """Construct the Starlette ASGI application without binding a port."""
     routes: list[Route | WebSocketRoute | Mount] = [
         Route("/api/health", health, methods=["GET"]),
@@ -195,13 +248,13 @@ def build_app(parent_pid: int | None = None) -> ASGIApp:
     else:  # pragma: no cover — only hit if web/ is missing in a packaged sdist
         _log.warning("server.web_dir_missing", extra={"path": str(_WEB_DIR)})
 
-    return Starlette(routes=routes, lifespan=_make_lifespan(parent_pid))
+    return Starlette(routes=routes, lifespan=_make_lifespan(parent_pid, dev=dev))
 
 
-def run(*, host: str, port: int, parent_pid: int | None = None) -> None:
+def run(*, host: str, port: int, parent_pid: int | None = None, dev: bool = False) -> None:
     """Block on a uvicorn server bound to ``host:port``."""
     config = uvicorn.Config(
-        app=build_app(parent_pid=parent_pid),
+        app=build_app(parent_pid=parent_pid, dev=dev),
         host=host,
         port=port,
         log_config=None,  # we own logging via _logging.py

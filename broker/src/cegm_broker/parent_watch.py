@@ -25,7 +25,13 @@ async def watch(parent_pid: int) -> None:
     _log.info("parent_watch.start", extra={"parent_pid": parent_pid})
     try:
         while True:
-            if not psutil.pid_exists(parent_pid):
+            try:
+                alive = psutil.pid_exists(parent_pid)
+            except (PermissionError, OSError, psutil.Error):
+                _log.warning("parent_watch.pid_check_error", extra={"parent_pid": parent_pid})
+                _request_shutdown()
+                return
+            if not alive:
                 _log.info("parent_watch.parent_gone", extra={"parent_pid": parent_pid})
                 _request_shutdown()
                 return

@@ -80,7 +80,7 @@ class DynamicToolRegistry:
             return
         try:
             raw = json.loads(self.storage_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             _log.warning(
                 "dynamic_tools.reload_failed",
                 extra={"path": str(self.storage_path), "err": repr(exc)},

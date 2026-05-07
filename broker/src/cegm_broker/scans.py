@@ -8,15 +8,23 @@ the dashboard can show "Scan 3 — 107 hits" cards without re-querying.
 
 Snapshots are read-only and cheap; only the **most recent** scan can
 be narrowed (because that's the only one upstream still has live).
+
+Session persistence: scans are auto-saved to disk on every record and
+can be restored on broker restart.
 """
 
 from __future__ import annotations
 
+import contextlib
+import json
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Final
 from uuid import uuid4
+
+from cegm_broker._paths import data_root, ensure_dir
 
 _DEFAULT_HISTORY: Final[int] = 32
 _PAGE_LIMIT: Final[int] = 200
@@ -38,11 +46,70 @@ class ScanRecord:
     note: str = ""
 
 
+def _session_path() -> Path:
+    return data_root() / "sessions" / "scans.json"
+
+
 @dataclass(slots=True)
 class ScanRegistry:
     """In-memory scan history. Bounded ring buffer."""
 
     history: deque[ScanRecord] = field(default_factory=lambda: deque(maxlen=_DEFAULT_HISTORY))
+    _auto_persist: bool = True
+
+    def save_to_disk(self) -> None:
+        """Persist scan records to disk for session restore."""
+        path = _session_path()
+        ensure_dir(path.parent)
+        payload = [
+            {
+                "scan_id": r.scan_id,
+                "started_at": r.started_at,
+                "value": r.value,
+                "vt": r.vt,
+                "op": r.op,
+                "parent_id": r.parent_id,
+                "count": r.count,
+                "page_size": r.page_size,
+                "results": r.results,
+                "note": r.note,
+            }
+            for r in self.history
+        ]
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+
+    def load_from_disk(self) -> int:
+        """Restore scans from disk. Returns the count of restored records."""
+        path = _session_path()
+        if not path.exists():
+            return 0
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return 0
+        if not isinstance(raw, list):
+            return 0
+        loaded = 0
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            rec = ScanRecord(
+                scan_id=entry.get("scan_id", f"scan-{uuid4()}"),
+                started_at=entry.get("started_at", ""),
+                value=str(entry.get("value", "")),
+                vt=str(entry.get("vt", "int32")),
+                op=str(entry.get("op", "exact")),
+                parent_id=entry.get("parent_id"),
+                count=int(entry.get("count", 0)),
+                page_size=int(entry.get("page_size", 0)),
+                results=list(entry.get("results", [])),
+                note=str(entry.get("note", "")),
+            )
+            self.history.append(rec)
+            loaded += 1
+        return loaded
 
     def record(
         self,
@@ -69,6 +136,9 @@ class ScanRegistry:
             note=note,
         )
         self.history.append(rec)
+        if self._auto_persist:
+            with contextlib.suppress(OSError):
+                self.save_to_disk()
         return rec
 
     def latest(self) -> ScanRecord | None:
@@ -82,14 +152,12 @@ class ScanRegistry:
 
     def remove(self, scan_id: str) -> bool:
         """Remove a record. Returns ``True`` if it was found."""
-        for i, rec in enumerate(self.history):
-            if rec.scan_id == scan_id:
-                # ``deque`` doesn't support ``del[i]``; rebuild it.
-                kept = [r for j, r in enumerate(self.history) if j != i]
-                self.history.clear()
-                self.history.extend(kept)
-                return True
-        return False
+        # Use a temporary list to filter — bounded at history maxlen so
+        # this is O(n) with n ≤ 32, negligible cost.
+        new = deque((r for r in self.history if r.scan_id != scan_id), maxlen=self.history.maxlen)
+        found = len(new) < len(self.history)
+        self.history = new
+        return found
 
     def snapshot(self, limit: int = 16) -> list[dict[str, Any]]:
         """Return a JSON-friendly summary of recent scans, newest first."""

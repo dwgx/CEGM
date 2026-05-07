@@ -37,10 +37,10 @@ Hand off a chat message to the CEGM browser dashboard.
 
 #### `cegm.scan`
 
-First-scan wrapper. Calls upstream `scan_all` then immediately fetches the first page so the LLM doesn't have to issue a second `get_scan_results`.
+First-scan wrapper. Calls upstream `scan_all` then immediately fetches the first page so the LLM doesn't have to issue a second `get_scan_results`. If `value` is provided, performs an exact-value scan. If `value` is omitted or empty, performs an **unknown initial value** scan — use this when the value isn't shown as a number (health bar, speed slider, etc.). Follow unknown-init scans with `cegm.scan_narrow` using `op='changed'`, `'unchanged'`, `'increased'`, or `'decreased'`.
 
-- **Args:** `{ value: string, vt?: string = "int32", max_results?: int = 50, protection?: string = "+W-C" }`
-- **Returns:** `{ scan_id, value, vt, count, page_size, results: [{address, value}] }`
+- **Args:** `{ value?: string, vt?: string = "int32", max_results?: int = 50, protection?: string = "+W-C" }`
+- **Returns:** `{ scan_id, value, vt, count, page_size, results: [{address, value}], unknown_init?: bool, next_step?: string }`
 - **Side effect:** publishes `scan_started`. Broker keeps the first page snapshot so the dashboard's Scans tab can re-render it.
 
 #### `cegm.scan_narrow`
@@ -73,6 +73,23 @@ Register an address as a live watch.
 - Idempotent on `(address, vt)` — re-adding updates the label.
 - **Side effect:** `watch_added` then `watch_update` on every change.
 
+#### `cegm.watch_freeze`
+
+Lock a watched address to a fixed value. The broker re-writes the value every ~250ms whenever the in-game value deviates. The address must already be registered via `cegm.watch_add`.
+
+- **Args:** `{ key: string, value: string }` — `key` is a watch_id or address; `value` is the target (integer, float, or string matching the vt type)
+- **Returns:** `{ ok, watch_id, address, vt, freeze_value, note }`
+- **Side effect:** `watch_frozen` event; every subsequent poll cycle checks and re-writes.
+- **Error:** `KeyError` if the address is not watched yet.
+
+#### `cegm.watch_unfreeze`
+
+Stop freezing a watched address. The game regains control of the value.
+
+- **Args:** `{ key: string }` — watch_id or address
+- **Returns:** `{ ok, watch_id, address, note }`
+- **Side effect:** `watch_unfrozen` event; poller stops re-writing.
+
 #### `cegm.watch_remove`
 
 Stop watching an address.
@@ -85,7 +102,7 @@ Stop watching an address.
 Snapshot of currently-active watches.
 
 - **Args:** `{}`
-- **Returns:** `{ watches: [{watch_id, address, vt, label, last_value, last_seen_ts, error}], count }`
+- **Returns:** `{ watches: [{watch_id, address, vt, label, last_value, last_seen_ts, error, frozen, freeze_value}], count, frozen_count }`
 
 ### Memory inspection
 
@@ -143,6 +160,7 @@ The dashboard subscribes to `ws://127.0.0.1:27077/events`. Each frame is one JSO
         | "chat_user" | "chat_assistant" | "chat_token"
         | "scan_started" | "scan_narrowed" | "scan_dropped"
         | "watch_added" | "watch_update" | "watch_removed"
+        | "watch_frozen" | "watch_unfrozen"
         | "dashboard_chat_request"
         | "dynamic_tool_defined" | "dynamic_tool_undefined" | "dynamic_tool_called"
         | "broker_status",
@@ -160,6 +178,9 @@ The original `TOOL_SPEC.md` listed these — they're tracked in [ROADMAP.md](ROA
 - `cegm.commit_pending` / `cegm.cancel_pending` — confirm or discard.
 - `cegm.snapshot_take` / `snapshot_restore` / `snapshot_list` — labeled rollback points.
 - `cegm.recipe_list` / `recipe_run` — guided multi-tool workflows for `find-numeric-stat`, `follow-pointer-chain`, `dissect-struct-at`, `code-cave-inject`, `aob-signature-lock`.
+
+Already shipped ahead of schedule:
+- `cegm.watch_freeze` / `cegm.watch_unfreeze` — lock values at a target (the "infinite HP" primitive).
 
 ## Adding a new CEGM tool
 

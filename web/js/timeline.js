@@ -1,91 +1,56 @@
 /**
- * @file Renders incoming events as rows in the activity timeline.
- *
- * Event shape (from broker, see docs/TOOL_SPEC.md §"Events on the WebSocket"):
- *   { ts, id, kind, data }
- *
- * Rendering for Phase 1 is intentionally minimal — one row per event with a
- * timestamp, a tag for the event kind, and a JSON-stringified payload.
- * Phase 2 layers diff highlighting and expandable details on top.
+ * @file Timeline — chronological event stream with color-coded kinds.
  */
-import {t} from "/js/i18n.js";
+const MAX_ROWS = 300;
 
-const TIMELINE_ID = "timeline";
-const MAX_ROWS = 500;
+function container() { return document.getElementById("timeline-list"); }
 
 const KIND_COLORS = {
-  tool_called:        "text-sky-400",
-  tool_result:        "text-emerald-400",
-  tool_error:         "text-red-400",
-  chat_user:          "text-zinc-300",
-  chat_assistant:     "text-zinc-200",
-  chat_token:         "text-zinc-500",
-  preview_pending:    "text-amber-400",
-  preview_committed:  "text-emerald-300",
-  preview_canceled:   "text-zinc-500",
-  snapshot_taken:     "text-violet-400",
-  snapshot_restored:  "text-violet-300",
-  broker_status:      "text-zinc-500",
-  ce_status:          "text-zinc-500",
-  dashboard_chat_request: "text-fuchsia-400",
+  tool_called: "hsl(var(--primary))",
+  tool_result: "hsl(var(--success))",
+  tool_error: "hsl(var(--destructive))",
+  chat_user: "hsl(var(--foreground))",
+  chat_assistant: "hsl(var(--foreground))",
+  scan_started: "hsl(var(--primary))",
+  scan_narrowed: "hsl(var(--primary))",
+  watch_frozen: "hsl(195 80% 60%)",
+  broker_status: "hsl(var(--muted-foreground))",
+  dashboard_chat_request: "hsl(300 60% 60%)",
 };
 
-function timelineEl() {
-  return document.getElementById(TIMELINE_ID);
+function timeShort(iso) {
+  const m = iso?.match?.(/T(\d\d:\d\d:\d\d)/);
+  return m ? m[1] : "";
 }
 
-function formatTime(iso) {
-  const m = iso.match(/T(\d\d:\d\d:\d\d\.\d{3})/);
-  return m ? m[1] : iso;
-}
-
-/** Append one event to the timeline; trim oldest rows past MAX_ROWS. */
 export function appendEventRow(evt) {
-  const list = timelineEl();
-  if (!list) return;
+  const root = container(); if (!root) return;
+  const div = document.createElement("div");
+  div.style.cssText = "padding:4px 10px;border-bottom:1px solid hsl(var(--border));font-size:10.5px;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-all;line-height:1.5;";
 
-  // First real event clears the placeholder row.
-  const first = list.firstElementChild;
-  if (first?.dataset?.i18n === "activity.empty") {
-    list.replaceChildren();
-  }
+  const ts = timeShort(evt.ts);
+  const kind = evt.kind || "event";
+  const color = KIND_COLORS[kind] || "hsl(var(--foreground))";
+  const data = evt.data || {};
 
-  const li = document.createElement("li");
-  li.className = "border-l-2 border-zinc-800 pl-3 py-1 break-words";
+  const label = kind === "tool_called" ? `▶ ${data.name || "?"}`
+    : kind === "tool_result" ? `✓ ${data.name || "?"}`
+    : kind === "tool_error" ? `✗ ${data.name || "?"}`
+    : kind === "chat_user" ? "👤 User"
+    : kind === "chat_assistant" ? "🤖 AI"
+    : kind;
+  const detail = JSON.stringify(data, null, 0).slice(0, 260);
 
-  const head = document.createElement("div");
-  head.className = "flex items-baseline gap-2";
+  div.innerHTML = `<span style="color:hsl(var(--muted-foreground));margin-right:8px;">${ts}</span><span style="color:${color}">${label}</span> <span style="color:hsl(var(--muted-foreground))">${detail}</span>`;
 
-  const ts = document.createElement("span");
-  ts.className = "text-zinc-500";
-  ts.textContent = formatTime(evt.ts ?? new Date().toISOString());
-
-  const kind = document.createElement("span");
-  kind.className = (KIND_COLORS[evt.kind] ?? "text-zinc-300") + " uppercase";
-  kind.textContent = evt.kind ?? "event";
-
-  head.append(ts, kind);
-
-  const body = document.createElement("pre");
-  body.className = "mt-0.5 whitespace-pre-wrap text-zinc-400";
-  body.textContent = JSON.stringify(evt.data ?? {}, null, 2);
-
-  li.append(head, body);
-  list.append(li);
-
-  while (list.childElementCount > MAX_ROWS) {
-    list.firstElementChild?.remove();
-  }
-  list.scrollTop = list.scrollHeight;
+  root.prepend(div);
+  while (root.children.length > MAX_ROWS) root.lastElementChild?.remove();
 }
 
 export function clearTimeline() {
-  const list = timelineEl();
-  if (!list) return;
-  list.replaceChildren();
-  const placeholder = document.createElement("li");
-  placeholder.className = "text-zinc-600";
-  placeholder.dataset.i18n = "activity.empty";
-  placeholder.textContent = t("activity.empty");
-  list.append(placeholder);
+  const root = container(); if (root) root.innerHTML = "";
+}
+
+export function bindTimeline({onEvent}) {
+  onEvent((evt) => { if (evt) appendEventRow(evt); });
 }

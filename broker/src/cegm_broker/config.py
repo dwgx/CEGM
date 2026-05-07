@@ -9,6 +9,7 @@ through the ``/api/config`` endpoint, which round-trips through this module.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -98,12 +99,20 @@ class Config(BaseModel):
 
     @classmethod
     def load(cls) -> Self:
-        """Load config from disk, returning defaults if the file is missing."""
+        """Load config from disk, returning defaults if the file is missing
+        or corrupted."""
         path = config_path()
         if not path.exists():
             return cls()
-        with path.open("r", encoding="utf-8") as fh:
-            raw = json.load(fh)
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logging.getLogger("cegm_broker.config").warning(
+                "config.load_failed",
+                extra={"path": str(path), "err": repr(exc)},
+            )
+            return cls()
         return cls.model_validate(raw)
 
     def save(self) -> None:
