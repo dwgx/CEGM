@@ -7,7 +7,6 @@ Groups support batch freeze/unfreeze and are persisted per game profile.
 
 from __future__ import annotations
 
-import builtins
 import contextlib
 import json
 from dataclasses import dataclass, field
@@ -98,7 +97,7 @@ class GroupRegistry:
             return True
         return False
 
-    def addresses_for(self, group_id: str) -> builtins.list[str]:
+    def addresses_for(self, group_id: str) -> list[str]:
         """Return the address list for a group (for unfreeze on delete)."""
         g = self._groups.get(group_id)
         return list(g.addresses) if g else []
@@ -106,10 +105,10 @@ class GroupRegistry:
     def get(self, group_id: str) -> Group | None:
         return self._groups.get(group_id)
 
-    def list(self) -> builtins.list[Group]:
+    def list_groups(self) -> list[Group]:
         return list(self._groups.values())
 
-    def find_by_address(self, address: str) -> builtins.list[Group]:
+    def find_by_address(self, address: str) -> list[Group]:
         return [g for g in self._groups.values() if address in g.addresses]
 
     def _profile_path(self) -> Path:

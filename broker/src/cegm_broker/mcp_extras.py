@@ -949,7 +949,10 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
     if name == "cegm.group_list":
         if groups is None:
             raise RuntimeError("requires group registry")
-        return _text({"groups": [g.to_dict() for g in groups.list()], "count": len(groups.list())})
+        group_list = groups.list_groups()
+        return _text(
+            {"groups": [group.to_dict() for group in group_list], "count": len(group_list)}
+        )
 
     if name == "cegm.group_freeze":
         if groups is None or watches is None:
@@ -1230,21 +1233,21 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             )
 
         if count <= _MAX_IDENTIFY_CANDIDATES:
-            watch_ids: list[str] = []
+            narrowed_watch_ids: list[str] = []
             for r in results:
                 addr = str(r.get("address", ""))
                 candidate_watch = watches.add(
                     address=addr,
                     vt=vt,
-                    label=f"{stat_name}#{len(watch_ids) + 1}",
+                    label=f"{stat_name}#{len(narrowed_watch_ids) + 1}",
                 )
-                watch_ids.append(candidate_watch.watch_id)
+                narrowed_watch_ids.append(candidate_watch.watch_id)
             recipes.advance(
                 recipe_id,
                 state="identifying",
                 scan_count=count,
                 candidates=results,
-                watch_ids=watch_ids,
+                watch_ids=narrowed_watch_ids,
                 message_to_user=(
                     f"Narrowed to {count} candidate(s). Watches added. "
                     "Ask the user to change the value and confirm which "
@@ -1259,7 +1262,7 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
                     "stat_name": stat_name,
                     "count": count,
                     "candidates": results,
-                    "watch_ids": watch_ids,
+                    "watch_ids": narrowed_watch_ids,
                     "message_to_user": (
                         f"Narrowed to {count} candidate(s) for {stat_name}. "
                         "I've added live watches. Now change the value "
