@@ -661,7 +661,7 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             {"offset": 0, "limit": max_results},
         )
         results = list(page.get("results", []))[:max_results]
-        rec = scans.record(
+        scan_record = scans.record(
             value=value if value else "(unknown)",
             vt=vt,
             op=scan_op,
@@ -673,21 +673,21 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             Event.make(
                 "scan_started",
                 {
-                    "scan_id": rec.scan_id,
+                    "scan_id": scan_record.scan_id,
                     "value": value if value else "(unknown initial)",
                     "vt": vt,
                     "count": count,
-                    "page_size": rec.page_size,
+                    "page_size": scan_record.page_size,
                     "unknown_init": unknown_init,
                 },
             )
         )
         result: dict[str, Any] = {
-            "scan_id": rec.scan_id,
+            "scan_id": scan_record.scan_id,
             "value": value if value else "(unknown initial)",
             "vt": vt,
             "count": count,
-            "page_size": rec.page_size,
+            "page_size": scan_record.page_size,
             "results": results,
             "unknown_init": unknown_init,
         }
@@ -717,7 +717,7 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
         count = int(narrow_summary.get("count", 0))
         page = await _upstream_call(proxy, "get_scan_results", {"offset": 0, "limit": max_results})
         results = list(page.get("results", []))[:max_results]
-        rec = scans.record(
+        narrow_record = scans.record(
             value=narrow_value if narrow_value is not None else f"({op})",
             vt=latest.vt,
             op=op,
@@ -729,21 +729,21 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             Event.make(
                 "scan_narrowed",
                 {
-                    "scan_id": rec.scan_id,
+                    "scan_id": narrow_record.scan_id,
                     "parent_id": latest.scan_id,
                     "op": op,
                     "count": count,
-                    "page_size": rec.page_size,
+                    "page_size": narrow_record.page_size,
                 },
             )
         )
         return _text(
             {
-                "scan_id": rec.scan_id,
+                "scan_id": narrow_record.scan_id,
                 "parent_id": latest.scan_id,
                 "op": op,
                 "count": count,
-                "page_size": rec.page_size,
+                "page_size": narrow_record.page_size,
                 "results": results,
             }
         )
@@ -769,14 +769,26 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             raise ValueError("'address' is required")
         vt = str(arguments.get("vt", _VT_DEFAULT))
         label = str(arguments.get("label", ""))
-        w = watches.add(address=address, vt=vt, label=label)
+        added_watch = watches.add(address=address, vt=vt, label=label)
         await bus.publish(
             Event.make(
                 "watch_added",
-                {"watch_id": w.watch_id, "address": w.address, "vt": w.vt, "label": w.label},
+                {
+                    "watch_id": added_watch.watch_id,
+                    "address": added_watch.address,
+                    "vt": added_watch.vt,
+                    "label": added_watch.label,
+                },
             )
         )
-        return _text({"watch_id": w.watch_id, "address": w.address, "vt": w.vt, "label": w.label})
+        return _text(
+            {
+                "watch_id": added_watch.watch_id,
+                "address": added_watch.address,
+                "vt": added_watch.vt,
+                "label": added_watch.label,
+            }
+        )
 
     if name == "cegm.watch_remove":
         if watches is None:
@@ -798,22 +810,22 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             raise ValueError("'value' is required for freeze")
         min_v = arguments.get("min_value")
         max_v = arguments.get("max_value")
-        w = watches.freeze(
+        frozen_watch = watches.freeze(
             key,
             raw_value,
             min_value=float(min_v) if min_v is not None else None,
             max_value=float(max_v) if max_v is not None else None,
         )
-        if w is None:
+        if frozen_watch is None:
             raise KeyError(f"no watch found for key={key!r}; add it first with cegm.watch_add")
         await bus.publish(
             Event.make(
                 "watch_frozen",
                 {
-                    "watch_id": w.watch_id,
-                    "address": w.address,
-                    "vt": w.vt,
-                    "label": w.label,
+                    "watch_id": frozen_watch.watch_id,
+                    "address": frozen_watch.address,
+                    "vt": frozen_watch.vt,
+                    "label": frozen_watch.label,
                     "freeze_value": raw_value,
                 },
             )
@@ -821,12 +833,13 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
         return _text(
             {
                 "ok": True,
-                "watch_id": w.watch_id,
-                "address": w.address,
-                "vt": w.vt,
+                "watch_id": frozen_watch.watch_id,
+                "address": frozen_watch.address,
+                "vt": frozen_watch.vt,
                 "freeze_value": raw_value,
                 "note": (
-                    f"Address {w.address} frozen at {raw_value}. Broker re-writes every 250ms."
+                    f"Address {frozen_watch.address} frozen at {raw_value}. "
+                    "Broker re-writes every 250ms."
                 ),
             }
         )
@@ -837,25 +850,25 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
         key = str(arguments.get("key", ""))
         if not key:
             raise ValueError("'key' is required")
-        w = watches.unfreeze(key)
-        if w is None:
+        unfrozen_watch = watches.unfreeze(key)
+        if unfrozen_watch is None:
             raise KeyError(f"no watch found for key={key!r}")
         await bus.publish(
             Event.make(
                 "watch_unfrozen",
                 {
-                    "watch_id": w.watch_id,
-                    "address": w.address,
-                    "vt": w.vt,
-                    "label": w.label,
+                    "watch_id": unfrozen_watch.watch_id,
+                    "address": unfrozen_watch.address,
+                    "vt": unfrozen_watch.vt,
+                    "label": unfrozen_watch.label,
                 },
             )
         )
         return _text(
             {
                 "ok": True,
-                "watch_id": w.watch_id,
-                "address": w.address,
+                "watch_id": unfrozen_watch.watch_id,
+                "address": unfrozen_watch.address,
                 "note": "Freeze removed. The game now controls this value again.",
             }
         )
@@ -888,31 +901,38 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             raise ValueError("'name' is required")
         addrs = list(arguments.get("addresses") or [])
         note = str(arguments.get("note", ""))
-        g = groups.create(gname, [str(a) for a in addrs], note=note)
+        created_group = groups.create(gname, [str(a) for a in addrs], note=note)
         await bus.publish(
-            Event.make("group_created", {"group_id": g.group_id, "name": g.name, "color": g.color})
+            Event.make(
+                "group_created",
+                {
+                    "group_id": created_group.group_id,
+                    "name": created_group.name,
+                    "color": created_group.color,
+                },
+            )
         )
-        return _text({"ok": True, "group": g.to_dict()})
+        return _text({"ok": True, "group": created_group.to_dict()})
 
     if name == "cegm.group_add":
         if groups is None:
             raise RuntimeError("requires group registry")
         gid = str(arguments.get("group_id", ""))
         addr = str(arguments.get("address", ""))
-        g = groups.add(gid, addr)
-        if g is None:
+        updated_group = groups.add(gid, addr)
+        if updated_group is None:
             raise KeyError(f"group {gid!r} not found")
-        return _text({"ok": True, "group": g.to_dict()})
+        return _text({"ok": True, "group": updated_group.to_dict()})
 
     if name == "cegm.group_remove_addr":
         if groups is None:
             raise RuntimeError("requires group registry")
         gid = str(arguments.get("group_id", ""))
         addr = str(arguments.get("address", ""))
-        g = groups.remove_addr(gid, addr)
-        if g is None:
+        updated_group = groups.remove_addr(gid, addr)
+        if updated_group is None:
             raise KeyError(f"group {gid!r} not found")
-        return _text({"ok": True, "group": g.to_dict()})
+        return _text({"ok": True, "group": updated_group.to_dict()})
 
     if name == "cegm.group_delete":
         if groups is None:
@@ -935,29 +955,31 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
         if groups is None or watches is None:
             raise RuntimeError("requires groups + watches")
         gid = str(arguments.get("group_id", ""))
-        value = arguments.get("value")
-        if value is None:
+        freeze_value = arguments.get("value")
+        if freeze_value is None:
             raise ValueError("'value' is required")
-        g = groups.get(gid)
-        if g is None:
+        target_group = groups.get(gid)
+        if target_group is None:
             raise KeyError(f"group {gid!r} not found")
         frozen = []
-        for addr in g.addresses:
+        for addr in target_group.addresses:
             try:
-                watches.freeze(addr, value)
+                watches.freeze(addr, freeze_value)
                 frozen.append(addr)
             except Exception as exc:
                 _log.warning("group_freeze.skip", extra={"addr": addr, "err": repr(exc)})
-        return _text({"ok": True, "frozen_count": len(frozen), "total": len(g.addresses)})
+        return _text(
+            {"ok": True, "frozen_count": len(frozen), "total": len(target_group.addresses)}
+        )
 
     if name == "cegm.group_unfreeze":
         if groups is None or watches is None:
             raise RuntimeError("requires groups + watches")
         gid = str(arguments.get("group_id", ""))
-        g = groups.get(gid)
-        if g is None:
+        target_group = groups.get(gid)
+        if target_group is None:
             raise KeyError(f"group {gid!r} not found")
-        for addr in g.addresses:
+        for addr in target_group.addresses:
             try:
                 watches.unfreeze(addr)
             except Exception as exc:
@@ -1038,14 +1060,14 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             page = await _upstream_call(proxy, "get_scan_results", {"offset": 0, "limit": 10})
             results = list(page.get("results", []))[:10]
 
-            rec = recipes.start(name=stat_name, vt=vt)
-            rec = recipes.advance(
-                rec.recipe_id,
+            started_recipe = recipes.start(name=stat_name, vt=vt)
+            recipe_state = recipes.advance(
+                started_recipe.recipe_id,
                 state="scanning",
                 scan_count=count,
                 candidates=results,
             )
-            if rec is None:
+            if recipe_state is None:
                 raise RuntimeError("recipe disappeared after start")
 
             scans.record(
@@ -1062,10 +1084,10 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
                     f"with vt={vt}. Try a different value type (float? int64?) or verify "
                     "the value you see on screen matches what you scanned for."
                 )
-                recipes.advance(rec.recipe_id, state="scanning", message_to_user=msg)
+                recipes.advance(recipe_state.recipe_id, state="scanning", message_to_user=msg)
                 return _text(
                     {
-                        "recipe_id": rec.recipe_id,
+                        "recipe_id": recipe_state.recipe_id,
                         "state": "scanning",
                         "stat_name": stat_name,
                         "count": 0,
@@ -1078,10 +1100,14 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
                 watch_ids: list[str] = []
                 for r in results:
                     addr = str(r.get("address", ""))
-                    w = watches.add(address=addr, vt=vt, label=f"{stat_name}#{len(watch_ids) + 1}")
-                    watch_ids.append(w.watch_id)
+                    candidate_watch = watches.add(
+                        address=addr,
+                        vt=vt,
+                        label=f"{stat_name}#{len(watch_ids) + 1}",
+                    )
+                    watch_ids.append(candidate_watch.watch_id)
                 recipes.advance(
-                    rec.recipe_id,
+                    recipe_state.recipe_id,
                     state="identifying",
                     scan_count=count,
                     candidates=results,
@@ -1095,7 +1121,7 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
                 )
                 return _text(
                     {
-                        "recipe_id": rec.recipe_id,
+                        "recipe_id": recipe_state.recipe_id,
                         "state": "identifying",
                         "stat_name": stat_name,
                         "count": count,
@@ -1116,10 +1142,10 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
                 f"game (take damage, spend gold, etc.) and tell you the NEW value. "
                 f"Then call this tool again with the same recipe_id and the new value."
             )
-            recipes.advance(rec.recipe_id, state="scanning", message_to_user=msg)
+            recipes.advance(recipe_state.recipe_id, state="scanning", message_to_user=msg)
             return _text(
                 {
-                    "recipe_id": rec.recipe_id,
+                    "recipe_id": recipe_state.recipe_id,
                     "state": "scanning",
                     "stat_name": stat_name,
                     "count": count,
@@ -1128,17 +1154,19 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             )
 
         # ── continue existing recipe ──
-        rec = recipes.get(recipe_id)
-        if rec is None:
+        recipe_state = recipes.get(recipe_id)
+        if recipe_state is None:
             raise KeyError(f"recipe {recipe_id!r} not found; it may have expired")
 
         # ── confirmation: user identified the right address ──
         if confirmed and target_value:
-            w = watches.freeze(confirmed, target_value)
-            if w is None:
+            confirmed_watch = watches.freeze(confirmed, target_value)
+            if confirmed_watch is None:
                 # Try to add it first, then freeze
-                w = watches.add(address=confirmed, vt=vt, label=stat_name)
-                w = watches.freeze(w.watch_id, target_value)
+                added_watch = watches.add(address=confirmed, vt=vt, label=stat_name)
+                confirmed_watch = watches.freeze(added_watch.watch_id, target_value)
+            if confirmed_watch is None:
+                raise RuntimeError(f"failed to freeze confirmed address {confirmed!r}")
             recipes.advance(
                 recipe_id,
                 state="done",
@@ -1202,11 +1230,15 @@ async def dispatch(  # noqa: PLR0911, PLR0912, PLR0915 — single fan-out by too
             )
 
         if count <= _MAX_IDENTIFY_CANDIDATES:
-            watch_ids = []
+            watch_ids: list[str] = []
             for r in results:
                 addr = str(r.get("address", ""))
-                w = watches.add(address=addr, vt=vt, label=f"{stat_name}#{len(watch_ids) + 1}")
-                watch_ids.append(w.watch_id)
+                candidate_watch = watches.add(
+                    address=addr,
+                    vt=vt,
+                    label=f"{stat_name}#{len(watch_ids) + 1}",
+                )
+                watch_ids.append(candidate_watch.watch_id)
             recipes.advance(
                 recipe_id,
                 state="identifying",
