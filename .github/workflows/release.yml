@@ -84,7 +84,7 @@ jobs:
       url: https://pypi.org/p/cegm-broker
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: cegm-broker-distributions
           path: dist
@@ -104,7 +104,7 @@ jobs:
       url: https://test.pypi.org/p/cegm-broker
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: cegm-broker-distributions
           path: dist
