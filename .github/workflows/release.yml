@@ -41,7 +41,7 @@ jobs:
         working-directory: broker
     steps:
       - name: Checkout (with submodules — needed for vendor/)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
